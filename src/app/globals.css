@@ -1,0 +1,37 @@
+@import "tailwindcss";
+
+:root {
+  --bg: #0b1020;
+  --panel: #131a2e;
+  --line: rgba(255, 255, 255, 0.07);
+}
+
+html,
+body {
+  background: var(--bg);
+  color: #e5e9f5;
+  font-family: var(--font-geist-sans), system-ui, sans-serif;
+}
+
+.panel {
+  background: linear-gradient(180deg, rgba(255,255,255,0.045), rgba(255,255,255,0.02));
+  border: 1px solid var(--line);
+  border-radius: 1rem;
+}
+
+.glow-total {
+  color: #34f5a0;
+  text-shadow: 0 0 18px rgba(52, 245, 160, 0.55);
+}
+
+.ticket {
+  background: #f8f8f6;
+  color: #1c2030;
+  clip-path: polygon(0 0, 100% 0, 100% calc(100% - 8px), 97% 100%, 94% calc(100% - 8px), 91% 100%, 88% calc(100% - 8px), 85% 100%, 82% calc(100% - 8px), 79% 100%, 76% calc(100% - 8px), 73% 100%, 70% calc(100% - 8px), 67% 100%, 64% calc(100% - 8px), 61% 100%, 58% calc(100% - 8px), 55% 100%, 52% calc(100% - 8px), 49% 100%, 46% calc(100% - 8px), 43% 100%, 40% calc(100% - 8px), 37% 100%, 34% calc(100% - 8px), 31% 100%, 28% calc(100% - 8px), 25% 100%, 22% calc(100% - 8px), 19% 100%, 16% calc(100% - 8px), 13% 100%, 10% calc(100% - 8px), 7% 100%, 4% calc(100% - 8px), 0 100%);
+}
+
+.scroll-thin::-webkit-scrollbar { width: 6px; }
+.scroll-thin::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 9px; }
+
+@keyframes pop { 0% { transform: scale(.94); } 100% { transform: scale(1); } }
+.pop { animation: pop .18s ease-out; }

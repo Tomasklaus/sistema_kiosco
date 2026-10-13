@@ -1,0 +1,230 @@
+"use client";
+
+import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
+import { Banknote, BookUser, CreditCard, Handshake, Lock, Minus, Plus, Radio, Search, Trash2 } from "lucide-react";
+import { toast } from "sonner";
+import { registrarVenta } from "@/actions/ventas";
+import { abrirTurno } from "@/actions/caja";
+import { useCartStore } from "@/stores/cart-store";
+import { useBarcodeScanner } from "@/hooks/use-barcode-scanner";
+import { cn, formatARS } from "@/lib/utils";
+import type { MetodoPago, ProductoUI } from "@/types";
+
+const PAGOS: { id: MetodoPago; key: string; label: string; icon: typeof Banknote }[] = [
+  { id: "efectivo", key: "F2", label: "Efectivo", icon: Banknote },
+  { id: "mercadopago", key: "F3", label: "MercadoPago", icon: Handshake },
+  { id: "tarjeta", key: "F4", label: "Tarjeta", icon: CreditCard },
+  { id: "cuenta_corriente", key: "F5", label: "A cuenta", icon: BookUser },
+];
+const COLORES = [
+  "from-red-500/25 to-red-500/5 border-red-400/30", "from-amber-500/25 to-amber-500/5 border-amber-400/30",
+  "from-sky-500/25 to-sky-500/5 border-sky-400/30", "from-emerald-500/25 to-emerald-500/5 border-emerald-400/30",
+  "from-violet-500/25 to-violet-500/5 border-violet-400/30", "from-pink-500/25 to-pink-500/5 border-pink-400/30",
+  "from-green-500/25 to-green-500/5 border-green-400/30",
+];
+
+export function PosScreen({ productos, turnoAbierto, clientes }: {
+  productos: ProductoUI[]; turnoAbierto: boolean; clientes: { id: string; nombre: string }[];
+}) {
+  const router = useRouter();
+  const [pending, startT] = useTransition();
+  const start = (fn: () => Promise<unknown>) => startT(async () => { await fn(); });
+  const { items, add, setCantidad, remove, clear, total } = useCartStore();
+  const [query, setQuery] = useState("");
+  const [pago, setPago] = useState<MetodoPago>("efectivo");
+  const [recibido, setRecibido] = useState("");
+  const [clienteId, setClienteId] = useState("");
+  const [fondo, setFondo] = useState("");
+  const [flash, setFlash] = useState(false);
+  const searchRef = useRef<HTMLInputElement>(null);
+
+  const totalVenta = total();
+  const vuelto = Math.max(0, (Number(recibido) || 0) - totalVenta);
+  const falta = (Number(recibido) || 0) < totalVenta;
+  const favoritos = productos.filter((p) => p.acceso_rapido);
+
+  const lista = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return q ? productos.filter((x) => x.nombre.toLowerCase().includes(q)) : productos;
+  }, [query, productos]);
+
+  const agregar = useCallback((prod: ProductoUI, cant = 1) => {
+    add(prod, cant);
+    setFlash(true);
+    setTimeout(() => setFlash(false), 150);
+  }, [add]);
+
+  const onScan = useCallback((code: string) => {
+    const prod = productos.find((x) => x.codigo_barras === code);
+    if (prod) { agregar(prod); setQuery(""); } else toast.error(`Código ${code} no encontrado`);
+  }, [agregar, productos]);
+  useBarcodeScanner(onScan);
+
+  const cobrar = useCallback(() => {
+    if (!items.length) return toast.error("El ticket está vacío");
+    if (pago === "efectivo" && recibido && falta) return toast.error("El monto recibido no alcanza");
+    if (pago === "cuenta_corriente" && !clienteId) return toast.error("Elegí un cliente para la venta a cuenta");
+    start(async () => {
+      const res = await registrarVenta(
+        items.map((i) => ({ producto_id: i.producto.id, cantidad: i.cantidad })),
+        pago,
+        pago === "efectivo" && recibido ? Number(recibido) : undefined,
+        pago === "cuenta_corriente" ? clienteId : undefined
+      );
+      if (!res.ok) return toast.error(res.error ?? "No se pudo registrar la venta");
+      toast.success(`Venta cobrada ${formatARS(totalVenta)}`);
+      clear(); setRecibido(""); setClienteId("");
+      router.refresh();
+    });
+  }, [items, pago, recibido, falta, clienteId, totalVenta, clear, router]);
+
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => {
+      const map: Record<string, MetodoPago> = { F2: "efectivo", F3: "mercadopago", F4: "tarjeta", F5: "cuenta_corriente" };
+      if (e.key === "F1") { e.preventDefault(); searchRef.current?.focus(); }
+      if (map[e.key]) { e.preventDefault(); setPago(map[e.key]); }
+      if (e.key === "F9") { e.preventDefault(); cobrar(); }
+    };
+    window.addEventListener("keydown", h);
+    return () => window.removeEventListener("keydown", h);
+  }, [cobrar]);
+
+  if (!turnoAbierto) {
+    return (
+      <div className="grid h-full place-items-center">
+        <div className="panel w-full max-w-sm space-y-4 p-6 text-center">
+          <Lock className="mx-auto size-10 text-emerald-400" />
+          <h2 className="text-xl font-bold">No hay turno de caja abierto</h2>
+          <p className="text-sm text-slate-400">Abrí el turno con el efectivo inicial para empezar a vender.</p>
+          <input value={fondo} onChange={(e) => setFondo(e.target.value.replace(/\D/g, ""))} placeholder="Fondo inicial (ej: 10000)"
+            className="w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-center outline-none focus:border-emerald-400" />
+          <button disabled={pending}
+            onClick={() => start(async () => {
+              const r = await abrirTurno(Number(fondo) || 0);
+              if (!r.ok) return toast.error(r.error);
+              toast.success("Turno abierto"); router.refresh();
+            })}
+            className="w-full rounded-xl bg-gradient-to-r from-emerald-500 to-teal-400 py-3 font-bold text-slate-950 disabled:opacity-50">
+            Abrir turno
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="grid h-full grid-cols-[1fr_380px] gap-4">
+      <section className="flex min-h-0 flex-col gap-4">
+        <div className="panel flex items-center gap-3 px-4 py-3">
+          <Search className="size-5 text-slate-500" />
+          <input ref={searchRef} value={query} onChange={(e) => setQuery(e.target.value)}
+            placeholder="F1 - Buscar producto o escanear código de barras..."
+            className="flex-1 bg-transparent text-sm outline-none placeholder:text-slate-500" />
+          <span className="flex items-center gap-1.5 rounded-full bg-emerald-500/15 px-3 py-1 text-[11px] font-semibold text-emerald-400">
+            <Radio className="size-3 animate-pulse" /> LECTOR ACTIVO
+          </span>
+        </div>
+
+        {favoritos.length > 0 && (
+          <div className="panel p-4">
+            <p className="mb-3 text-[11px] font-semibold uppercase tracking-widest text-slate-500">Quick access / Favoritos</p>
+            <div className="grid grid-cols-4 gap-3">
+              {favoritos.slice(0, 8).map((p, i) => (
+                <button key={p.id} onClick={() => agregar(p)}
+                  className={cn("flex h-16 flex-col justify-between rounded-xl border bg-gradient-to-br p-2.5 text-left text-sm font-medium transition hover:-translate-y-0.5 hover:brightness-125 active:scale-95", COLORES[i % COLORES.length])}>
+                  <span className="text-lg leading-none">{p.emoji}</span>
+                  <span className="truncate">{p.nombre}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div className="panel scroll-thin min-h-0 flex-1 overflow-y-auto p-4">
+          <div className="grid grid-cols-3 gap-3">
+            {lista.map((prod) => (
+              <button key={prod.id} onClick={() => agregar(prod)}
+                className="group relative overflow-hidden rounded-xl border border-white/5 bg-white/[0.03] p-3 text-left transition hover:-translate-y-0.5 hover:border-emerald-400/40 active:scale-[.97]">
+                <span className={cn("absolute right-2 top-2 rounded-md bg-black/50 px-1.5 py-0.5 text-[10px]", prod.stock <= prod.stock_minimo ? "text-red-400" : "text-slate-300")}>
+                  Stock: {prod.stock}
+                </span>
+                <div className="grid h-24 place-items-center text-6xl transition group-hover:scale-110">{prod.emoji}</div>
+                <p className="mt-2 text-sm font-medium">{prod.nombre}</p>
+                <p className="font-semibold text-emerald-400">{formatARS(prod.precio_venta)}</p>
+              </button>
+            ))}
+            {!lista.length && (
+              <p className="col-span-3 py-10 text-center text-slate-500">
+                {productos.length ? "Sin resultados" : "Todavía no hay productos. Cargalos desde Inventario."}
+              </p>
+            )}
+          </div>
+        </div>
+      </section>
+
+      <aside className="flex min-h-0 flex-col gap-3">
+        <div className="panel flex min-h-0 flex-1 flex-col p-4">
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="font-semibold">El Ticket</h2>
+            <button onClick={clear} className="text-slate-500 hover:text-red-400" aria-label="Vaciar"><Trash2 className="size-4" /></button>
+          </div>
+          <div className="ticket scroll-thin min-h-0 flex-1 overflow-y-auto px-4 pb-6 pt-4">
+            {!items.length && <p className="py-8 text-center text-sm text-slate-400">Escaneá o elegí un producto</p>}
+            {items.map(({ producto, cantidad }) => (
+              <div key={producto.id} className="pop flex items-center gap-2 border-t border-dashed border-slate-300 py-2.5">
+                <div className="flex items-center rounded-md bg-slate-200 text-xs font-semibold">
+                  <button onClick={() => setCantidad(producto.id, cantidad - 1)} className="px-1.5 py-1" aria-label="Menos"><Minus className="size-3" /></button>
+                  <span className="min-w-5 text-center">{cantidad}x</span>
+                  <button onClick={() => setCantidad(producto.id, cantidad + 1)} className="px-1.5 py-1" aria-label="Más"><Plus className="size-3" /></button>
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-semibold">{producto.nombre}</p>
+                  <p className="text-[11px] text-slate-500">({formatARS(producto.precio_venta)})</p>
+                </div>
+                <span className="text-sm font-medium">{formatARS(producto.precio_venta * cantidad)}</span>
+                <button onClick={() => remove(producto.id)} className="text-slate-400 hover:text-red-500" aria-label="Quitar"><Trash2 className="size-3.5" /></button>
+              </div>
+            ))}
+          </div>
+          <p className={cn("glow-total mt-4 text-center text-4xl font-extrabold tracking-tight transition", flash && "scale-105")}>
+            TOTAL: {formatARS(totalVenta)}
+          </p>
+          <div className="mt-3 grid grid-cols-4 gap-2">
+            {PAGOS.map(({ id, key, label, icon: Icon }) => (
+              <button key={id} onClick={() => setPago(id)}
+                className={cn("flex flex-col items-center gap-1 rounded-xl border p-2 text-[10px] transition",
+                  pago === id ? "border-emerald-400 bg-emerald-500/15 text-emerald-300" : "border-white/10 bg-white/5 text-slate-400 hover:bg-white/10")}>
+                <Icon className="size-4" /> {key} {label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="panel p-3">
+          {pago === "cuenta_corriente" ? (
+            <select value={clienteId} onChange={(e) => setClienteId(e.target.value)}
+              className="w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-sm outline-none focus:border-emerald-400">
+              <option value="">Elegí el cliente...</option>
+              {clientes.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+            </select>
+          ) : (
+            <div className="flex items-center justify-between gap-3">
+              <label className="flex-1 text-[11px] text-slate-500">
+                Paga con:
+                <input value={recibido} onChange={(e) => setRecibido(e.target.value.replace(/\D/g, ""))}
+                  disabled={pago !== "efectivo"} placeholder="$0" inputMode="numeric"
+                  className="mt-1 w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-base text-white outline-none focus:border-emerald-400 disabled:opacity-40" />
+              </label>
+              <p className="pt-4 text-xl">Vuelto: <b className={vuelto > 0 ? "text-emerald-400" : ""}>{formatARS(vuelto)}</b></p>
+            </div>
+          )}
+          <button onClick={cobrar} disabled={pending}
+            className="mt-3 w-full rounded-xl bg-gradient-to-r from-emerald-500 to-teal-400 py-3 font-bold text-slate-950 transition hover:brightness-110 active:scale-[.98] disabled:opacity-50">
+            {pending ? "Procesando..." : "COBRAR (F9)"}
+          </button>
+        </div>
+      </aside>
+    </div>
+  );
+}
