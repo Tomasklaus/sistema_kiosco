@@ -76,10 +76,11 @@ function StockBadge({ stock, min }: { stock: number; min: number }) {
   return <span className={cn("rounded-full px-2 py-0.5 text-[11px] font-medium ring-1", cls)}>{txt}</span>;
 }
 
-export function InventarioScreen({ productos, categorias, codigoInicial }: {
+export function InventarioScreen({ productos, categorias, codigoInicial, ocultarCostos = false }: {
   productos: ProductoUI[];
   categorias: Cat[];
   codigoInicial?: string;
+  ocultarCostos?: boolean;
 }) {
   const router = useRouter();
   const [pending, startT] = useTransition();
@@ -233,9 +234,11 @@ export function InventarioScreen({ productos, categorias, codigoInicial }: {
         <button onClick={() => setNuevo((v) => !v)} className="flex items-center gap-1.5 rounded-lg bg-emerald-500 px-4 py-2 text-sm font-semibold text-slate-950 hover:brightness-110">
           <Plus className="size-4" /> Nuevo Producto
         </button>
-        <button onClick={() => setAumento((v) => !v)} className="flex items-center gap-1.5 rounded-lg bg-orange-500 px-4 py-2 text-sm font-semibold text-slate-950 hover:brightness-110">
-          <TrendingUp className="size-4" /> Aumento Masivo
-        </button>
+        {!ocultarCostos && (
+          <button onClick={() => setAumento((v) => !v)} className="flex items-center gap-1.5 rounded-lg bg-orange-500 px-4 py-2 text-sm font-semibold text-slate-950 hover:brightness-110">
+            <TrendingUp className="size-4" /> Aumento Masivo
+          </button>
+        )}
         <button onClick={imprimirSeleccionadas} title="Imprimir etiquetas de códigos de barra para góndola" className="flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm font-semibold text-slate-200 hover:bg-white/10">
           <Printer className="size-4 text-emerald-400" /> Etiquetas
         </button>
@@ -286,9 +289,13 @@ export function InventarioScreen({ productos, categorias, codigoInicial }: {
         <table className="w-full text-sm">
           <thead className="sticky top-0 bg-[#131a2e] text-left text-[11px] uppercase tracking-wider text-slate-500">
             <tr>
-              <th className="px-4 py-3">Código</th><th>Producto</th>
-              <th className="text-right">Costo</th><th className="text-right">Venta</th>
-              <th className="text-right">Margen</th><th className="pl-6">Stock</th><th className="pr-4">Estado</th>
+              <th className="px-4 py-3">Código</th>
+              <th>Producto</th>
+              {!ocultarCostos && <th className="text-right">Costo</th>}
+              <th className="text-right">Venta</th>
+              {!ocultarCostos && <th className="text-right">Margen</th>}
+              <th className="pl-6">Stock</th>
+              <th className="pr-4">Estado</th>
             </tr>
           </thead>
           <tbody>
@@ -305,9 +312,11 @@ export function InventarioScreen({ productos, categorias, codigoInicial }: {
                     />
                   </td>
                   <td className="py-2 font-medium">{p.emoji} {p.nombre}</td>
-                  <td className="text-right text-slate-400">{formatARS(p.precio_costo)}</td>
+                  {!ocultarCostos && <td className="text-right text-slate-400">{formatARS(p.precio_costo)}</td>}
                   <td className="text-right"><EditableCell money value={p.precio_venta} onSave={(v) => editar(p.id, "precio_venta", v)} /></td>
-                  <td className={cn("text-right font-medium", margen < 20 ? "text-amber-300" : "text-emerald-400")}>{margen.toFixed(0)}%</td>
+                  {!ocultarCostos && (
+                    <td className={cn("text-right font-medium", margen < 20 ? "text-amber-300" : "text-emerald-400")}>{margen.toFixed(0)}%</td>
+                  )}
                   <td className="pl-6"><EditableCell value={p.stock} onSave={(v) => editar(p.id, "stock", v)} /></td>
                   <td className="pr-4"><StockBadge stock={p.stock} min={p.stock_minimo} /></td>
                 </tr>

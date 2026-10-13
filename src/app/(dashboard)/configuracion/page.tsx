@@ -8,6 +8,11 @@ export default async function ConfiguracionPage() {
     redirect("/login");
   }
 
+  // Los cajeros no pueden cambiar la configuración ni suscripciones
+  if (config.usuario.rol === "cajero") {
+    redirect("/pos");
+  }
+
   return (
     <ConfiguracionScreen
       negocio={config.negocio}
