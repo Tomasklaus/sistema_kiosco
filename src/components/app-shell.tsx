@@ -13,6 +13,7 @@ const links = [
   { href: "/caja", label: "Caja", icon: Landmark },
   { href: "/clientes", label: "Clientes", icon: Users },
   { href: "/reportes", label: "Reportes", icon: FileText },
+  { href: "/configuracion", label: "Configuración", icon: Settings },
 ];
 
 const titles: Record<string, string> = {
@@ -21,6 +22,7 @@ const titles: Record<string, string> = {
   "/caja": "Caja",
   "/clientes": "Clientes",
   "/reportes": "Reportes",
+  "/configuracion": "Configuración del Sistema",
   "/admin": "Panel Admin",
   "/equipo": "Mi Equipo",
 };
@@ -96,14 +98,9 @@ export function AppShell({ children, esAdmin = false }: { children: React.ReactN
                       <Users className="size-4" /> Mi Equipo
                     </Link>
                   )}
-                  {esAdmin && (
-                    <Link href="/suscripcion" className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-white hover:bg-white/10" onClick={() => setMenuOpen(false)}>
-                      <ShieldCheck className="size-4" /> Suscripción
-                    </Link>
-                  )}
-                  <button className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-white hover:bg-white/10" onClick={() => setMenuOpen(false)}>
+                  <Link href="/configuracion" className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-white hover:bg-white/10" onClick={() => setMenuOpen(false)}>
                     <Settings className="size-4" /> Configuración
-                  </button>
+                  </Link>
                   <form action={logout}>
                     <button className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-red-400 hover:bg-red-500/10">
                       <LogOut className="size-4" /> Salir

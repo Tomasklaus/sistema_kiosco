@@ -1,5 +1,5 @@
-import { SuscripcionScreen } from "@/components/suscripcion/suscripcion-screen";
+import { redirect } from "next/navigation";
 
-export default async function SuscripcionPage() {
-  return <SuscripcionScreen />;
+export default function SuscripcionRedirectPage() {
+  redirect("/configuracion");
 }
