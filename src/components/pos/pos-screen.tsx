@@ -2,7 +2,21 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Banknote, BookUser, Camera, CreditCard, Handshake, Lock, Minus, Plus, Radio, Search, Trash2 } from "lucide-react";
+import { 
+  Banknote, 
+  BookUser, 
+  Camera, 
+  CreditCard, 
+  Handshake, 
+  Lock, 
+  Minus, 
+  Plus, 
+  Radio, 
+  Search, 
+  Trash2,
+  Receipt,
+  Grid
+} from "lucide-react";
 import { toast } from "sonner";
 import { registrarVenta } from "@/actions/ventas";
 import { abrirTurno } from "@/actions/caja";
@@ -19,6 +33,7 @@ const PAGOS: { id: MetodoPago; key: string; label: string; icon: typeof Banknote
   { id: "tarjeta", key: "F4", label: "Tarjeta", icon: CreditCard },
   { id: "cuenta_corriente", key: "F5", label: "A cuenta", icon: BookUser },
 ];
+
 const COLORES = [
   "from-red-500/25 to-red-500/5 border-red-400/30", "from-amber-500/25 to-amber-500/5 border-amber-400/30",
   "from-sky-500/25 to-sky-500/5 border-sky-400/30", "from-emerald-500/25 to-emerald-500/5 border-emerald-400/30",
@@ -42,9 +57,14 @@ export function PosScreen({ productos, turnoAbierto, clientes }: {
   const [camara, setCamara] = useState(false);
   const [lectura, setLectura] = useState(false);
   const [ultimo, setUltimo] = useState<string | null>(null);
+  
+  // Vista en móvil: "catalogo" (para agregar productos) o "ticket" (para cobrar)
+  const [vistaMobile, setVistaMobile] = useState<"catalogo" | "ticket">("catalogo");
+  
   const searchRef = useRef<HTMLInputElement>(null);
 
   const totalVenta = total();
+  const cantidadItems = items.reduce((a, b) => a + b.cantidad, 0);
   const vuelto = Math.max(0, (Number(recibido) || 0) - totalVenta);
   const falta = (Number(recibido) || 0) < totalVenta;
   const favoritos = productos.filter((p) => p.acceso_rapido);
@@ -62,7 +82,7 @@ export function PosScreen({ productos, turnoAbierto, clientes }: {
 
   const onScan = useCallback((raw: string) => {
     const code = normalizarCodigo(raw);
-    setQuery(""); // el lector tipea en el buscador si está enfocado: se limpia siempre
+    setQuery("");
     setLectura(true);
     setTimeout(() => setLectura(false), 400);
     const prod = buscarPorCodigo(productos, code);
@@ -79,11 +99,11 @@ export function PosScreen({ productos, turnoAbierto, clientes }: {
     setUltimo(prod.nombre);
     if (prod.stock <= 0) toast.warning(`${prod.nombre} figura sin stock`);
   }, [agregar, productos, router]);
+
   useBarcodeScanner(onScan, { enabled: turnoAbierto && !camara });
 
   const buscarEnter = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key !== "Enter" || !query.trim()) return;
-    // Código tipeado a mano (o lector sin ráfaga): coincidencia exacta, o único resultado.
     const porCodigo = buscarPorCodigo(productos, query);
     const unico = lista.length === 1 ? lista[0] : undefined;
     const prod = porCodigo ?? unico;
@@ -103,7 +123,10 @@ export function PosScreen({ productos, turnoAbierto, clientes }: {
       );
       if (!res.ok) return toast.error(res.error ?? "No se pudo registrar la venta");
       toast.success(`Venta cobrada ${formatARS(totalVenta)}`);
-      clear(); setRecibido(""); setClienteId("");
+      clear(); 
+      setRecibido(""); 
+      setClienteId("");
+      setVistaMobile("catalogo");
       router.refresh();
     });
   }, [items, pago, recibido, falta, clienteId, totalVenta, clear, router]);
@@ -121,20 +144,26 @@ export function PosScreen({ productos, turnoAbierto, clientes }: {
 
   if (!turnoAbierto) {
     return (
-      <div className="grid h-full place-items-center">
+      <div className="grid h-full place-items-center py-10 px-4">
         <div className="panel w-full max-w-sm space-y-4 p-6 text-center">
           <Lock className="mx-auto size-10 text-emerald-400" />
           <h2 className="text-xl font-bold">No hay turno de caja abierto</h2>
           <p className="text-sm text-slate-400">Abrí el turno con el efectivo inicial para empezar a vender.</p>
-          <input value={fondo} onChange={(e) => setFondo(e.target.value.replace(/\D/g, ""))} placeholder="Fondo inicial (ej: 10000)"
-            className="w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-center outline-none focus:border-emerald-400" />
-          <button disabled={pending}
+          <input 
+            value={fondo} 
+            onChange={(e) => setFondo(e.target.value.replace(/\D/g, ""))} 
+            placeholder="Fondo inicial (ej: 10000)"
+            className="w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2.5 text-center text-lg outline-none focus:border-emerald-400" 
+          />
+          <button 
+            disabled={pending}
             onClick={() => start(async () => {
               const r = await abrirTurno(Number(fondo) || 0);
               if (!r.ok) return toast.error(r.error);
               toast.success("Turno abierto"); router.refresh();
             })}
-            className="w-full rounded-xl bg-gradient-to-r from-emerald-500 to-teal-400 py-3 font-bold text-slate-950 disabled:opacity-50">
+            className="w-full rounded-xl bg-gradient-to-r from-emerald-500 to-teal-400 py-3 font-bold text-slate-950 disabled:opacity-50"
+          >
             Abrir turno
           </button>
         </div>
@@ -143,123 +172,242 @@ export function PosScreen({ productos, turnoAbierto, clientes }: {
   }
 
   return (
-    <div className="grid h-full grid-cols-[1fr_380px] gap-4">
-      <section className="flex min-h-0 flex-col gap-4">
-        <div className="panel flex items-center gap-3 px-4 py-3">
-          <Search className="size-5 text-slate-500" />
-          <input ref={searchRef} value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={buscarEnter}
-            placeholder="F1 - Buscar producto o escanear código de barras..."
-            className="flex-1 bg-transparent text-sm outline-none placeholder:text-slate-500" />
-          {ultimo && <span className="max-w-48 truncate text-[11px] text-slate-400">Último: <b className="text-slate-200">{ultimo}</b></span>}
-          <button onClick={() => setCamara(true)} title="Escanear con la cámara"
-            className="flex items-center gap-1.5 rounded-full border border-white/10 px-3 py-1 text-[11px] font-semibold text-slate-300 transition hover:border-emerald-400/50 hover:text-emerald-300">
-            <Camera className="size-3.5" /> CÁMARA
-          </button>
-          <span className={cn("flex items-center gap-1.5 rounded-full px-3 py-1 text-[11px] font-semibold transition",
-            lectura ? "scale-110 bg-emerald-400 text-slate-950" : "bg-emerald-500/15 text-emerald-400")}>
-            <Radio className="size-3 animate-pulse" /> {lectura ? "LEÍDO" : "LECTOR ACTIVO"}
-          </span>
-        </div>
+    <div className="flex flex-col h-full gap-3">
+      {/* Selector móvil de vista Catálogo / Ticket */}
+      <div className="flex md:hidden rounded-xl border border-white/10 bg-white/5 p-1 gap-1">
+        <button
+          onClick={() => setVistaMobile("catalogo")}
+          className={cn(
+            "flex flex-1 items-center justify-center gap-2 rounded-lg py-2 text-xs font-bold transition",
+            vistaMobile === "catalogo" ? "bg-emerald-500 text-slate-950" : "text-slate-400 hover:text-white"
+          )}
+        >
+          <Grid className="size-4" /> Productos ({productos.length})
+        </button>
+        <button
+          onClick={() => setVistaMobile("ticket")}
+          className={cn(
+            "flex flex-1 items-center justify-center gap-2 rounded-lg py-2 text-xs font-bold transition",
+            vistaMobile === "ticket" ? "bg-emerald-500 text-slate-950" : "text-slate-400 hover:text-white"
+          )}
+        >
+          <Receipt className="size-4" /> Ticket ({cantidadItems}) · {formatARS(totalVenta)}
+        </button>
+      </div>
 
-        {favoritos.length > 0 && (
-          <div className="panel p-4">
-            <p className="mb-3 text-[11px] font-semibold uppercase tracking-widest text-slate-500">Quick access / Favoritos</p>
-            <div className="grid grid-cols-4 gap-3">
-              {favoritos.slice(0, 8).map((p, i) => (
-                <button key={p.id} onClick={() => agregar(p)}
-                  className={cn("flex h-16 flex-col justify-between rounded-xl border bg-gradient-to-br p-2.5 text-left text-sm font-medium transition hover:-translate-y-0.5 hover:brightness-125 active:scale-95", COLORES[i % COLORES.length])}>
-                  <span className="text-lg leading-none">{p.emoji}</span>
-                  <span className="truncate">{p.nombre}</span>
+      {/* Grid principal responsivo */}
+      <div className="grid h-full min-h-0 grid-cols-1 md:grid-cols-[1fr_360px] lg:grid-cols-[1fr_390px] gap-4">
+        {/* SECCIÓN 1: CATÁLOGO Y BÚSQUEDA */}
+        <section className={cn(
+          "flex min-h-0 flex-col gap-3",
+          vistaMobile === "ticket" && "hidden md:flex"
+        )}>
+          {/* Barra de búsqueda, lector y cámara */}
+          <div className="panel flex flex-wrap sm:flex-nowrap items-center gap-2.5 p-3">
+            <Search className="size-4.5 text-slate-500 shrink-0" />
+            <input 
+              ref={searchRef} 
+              value={query} 
+              onChange={(e) => setQuery(e.target.value)} 
+              onKeyDown={buscarEnter}
+              placeholder="Buscar producto o escanear..."
+              className="flex-1 min-w-[160px] bg-transparent text-sm outline-none placeholder:text-slate-500" 
+            />
+            
+            <div className="flex items-center gap-2 ml-auto">
+              {ultimo && (
+                <span className="hidden xl:inline max-w-36 truncate text-[11px] text-slate-400">
+                  Último: <b className="text-slate-200">{ultimo}</b>
+                </span>
+              )}
+              
+              <button 
+                onClick={() => setCamara(true)} 
+                title="Escanear con la cámara del dispositivo"
+                className="flex items-center gap-1.5 rounded-full border border-white/10 px-2.5 py-1 text-[11px] font-semibold text-slate-300 transition hover:border-emerald-400/50 hover:text-emerald-300"
+              >
+                <Camera className="size-3.5" /> <span className="hidden sm:inline">CÁMARA</span>
+              </button>
+
+              <span className={cn(
+                "flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold transition shrink-0",
+                lectura ? "scale-105 bg-emerald-400 text-slate-950" : "bg-emerald-500/15 text-emerald-400"
+              )}>
+                <Radio className="size-3 animate-pulse" /> {lectura ? "LEÍDO" : "LECTOR"}
+              </span>
+            </div>
+          </div>
+
+          {/* Favoritos / Acceso rápido */}
+          {favoritos.length > 0 && (
+            <div className="panel p-3 sm:p-4">
+              <p className="mb-2 text-[10px] font-semibold uppercase tracking-widest text-slate-500">Favoritos / Acceso rápido</p>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-2.5">
+                {favoritos.slice(0, 8).map((p, i) => (
+                  <button 
+                    key={p.id} 
+                    onClick={() => agregar(p)}
+                    className={cn(
+                      "flex h-14 sm:h-16 flex-col justify-between rounded-xl border bg-gradient-to-br p-2 text-left text-xs sm:text-sm font-medium transition hover:-translate-y-0.5 active:scale-95", 
+                      COLORES[i % COLORES.length]
+                    )}
+                  >
+                    <span className="text-base sm:text-lg leading-none">{p.emoji}</span>
+                    <span className="truncate">{p.nombre}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Grilla de productos con scroll */}
+          <div className="panel scroll-thin min-h-0 flex-1 overflow-y-auto p-3 sm:p-4">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2.5 sm:gap-3">
+              {lista.map((prod) => (
+                <button 
+                  key={prod.id} 
+                  onClick={() => agregar(prod)}
+                  className="group relative flex flex-col justify-between rounded-xl border border-white/5 bg-white/[0.03] p-2.5 sm:p-3 text-left transition hover:-translate-y-0.5 hover:border-emerald-400/40 active:scale-[0.97]"
+                >
+                  <span className={cn(
+                    "self-end rounded-md bg-black/60 px-1.5 py-0.5 text-[9px] font-mono", 
+                    prod.stock <= prod.stock_minimo ? "text-red-400" : "text-slate-400"
+                  )}>
+                    Stock: {prod.stock}
+                  </span>
+                  
+                  <div className="grid h-16 sm:h-20 place-items-center text-4xl sm:text-5xl transition group-hover:scale-110">
+                    {prod.emoji}
+                  </div>
+                  
+                  <div className="mt-1">
+                    <p className="text-xs sm:text-sm font-medium truncate">{prod.nombre}</p>
+                    <p className="font-bold text-emerald-400 text-xs sm:text-sm">{formatARS(prod.precio_venta)}</p>
+                  </div>
+                </button>
+              ))}
+              {!lista.length && (
+                <p className="col-span-full py-12 text-center text-sm text-slate-500">
+                  {productos.length ? "Sin resultados para tu búsqueda." : "Todavía no hay productos. Cargalos desde Inventario."}
+                </p>
+              )}
+            </div>
+          </div>
+        </section>
+
+        {/* SECCIÓN 2: TICKET DE VENTA Y COBRO */}
+        <aside className={cn(
+          "flex min-h-0 flex-col gap-3",
+          vistaMobile === "catalogo" && "hidden md:flex"
+        )}>
+          {/* El ticket */}
+          <div className="panel flex min-h-0 flex-1 flex-col p-3 sm:p-4">
+            <div className="mb-2.5 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Receipt className="size-4 text-emerald-400" />
+                <h2 className="font-semibold text-sm">El Ticket ({cantidadItems})</h2>
+              </div>
+              {items.length > 0 && (
+                <button onClick={clear} className="text-slate-400 hover:text-red-400 text-xs flex items-center gap-1 transition">
+                  <Trash2 className="size-3.5" /> Vaciar
+                </button>
+              )}
+            </div>
+
+            <div className="ticket scroll-thin min-h-[140px] flex-1 overflow-y-auto px-3 pb-5 pt-3">
+              {!items.length && (
+                <div className="py-10 text-center text-xs text-slate-400 space-y-1">
+                  <p>El ticket está vacío.</p>
+                  <p className="text-[11px] text-slate-500">Elegí productos del catálogo o pasalos por el lector.</p>
+                </div>
+              )}
+              {items.map(({ producto, cantidad }) => (
+                <div key={producto.id} className="pop flex items-center gap-2 border-t border-dashed border-slate-300 py-2">
+                  <div className="flex items-center rounded-md bg-slate-200 text-xs font-bold text-slate-800">
+                    <button onClick={() => setCantidad(producto.id, cantidad - 1)} className="px-1.5 py-1 hover:bg-slate-300 rounded-l" aria-label="Menos"><Minus className="size-3" /></button>
+                    <span className="min-w-4 text-center text-[11px]">{cantidad}</span>
+                    <button onClick={() => setCantidad(producto.id, cantidad + 1)} className="px-1.5 py-1 hover:bg-slate-300 rounded-r" aria-label="Más"><Plus className="size-3" /></button>
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-xs font-semibold leading-tight">{producto.nombre}</p>
+                    <p className="text-[10px] text-slate-500 font-mono">{formatARS(producto.precio_venta)}</p>
+                  </div>
+                  <span className="text-xs font-bold whitespace-nowrap">{formatARS(producto.precio_venta * cantidad)}</span>
+                  <button onClick={() => remove(producto.id)} className="text-slate-400 hover:text-red-500 p-1" aria-label="Quitar"><Trash2 className="size-3.5" /></button>
+                </div>
+              ))}
+            </div>
+
+            {/* Total general */}
+            <div className="mt-3 text-center">
+              <span className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold">Total a cobrar</span>
+              <p className={cn("glow-total text-3xl sm:text-4xl font-extrabold tracking-tight transition", flash && "scale-105")}>
+                {formatARS(totalVenta)}
+              </p>
+            </div>
+
+            {/* Selector de métodos de pago */}
+            <div className="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+              {PAGOS.map(({ id, key, label, icon: Icon }) => (
+                <button 
+                  key={id} 
+                  onClick={() => setPago(id)}
+                  className={cn(
+                    "flex flex-col items-center gap-1 rounded-xl border p-2 text-[10px] font-semibold transition active:scale-95",
+                    pago === id ? "border-emerald-400 bg-emerald-500/15 text-emerald-300" : "border-white/10 bg-white/5 text-slate-400 hover:bg-white/10"
+                  )}
+                >
+                  <Icon className="size-3.5" /> 
+                  <span className="truncate">{label}</span>
                 </button>
               ))}
             </div>
           </div>
-        )}
 
-        <div className="panel scroll-thin min-h-0 flex-1 overflow-y-auto p-4">
-          <div className="grid grid-cols-3 gap-3">
-            {lista.map((prod) => (
-              <button key={prod.id} onClick={() => agregar(prod)}
-                className="group relative overflow-hidden rounded-xl border border-white/5 bg-white/[0.03] p-3 text-left transition hover:-translate-y-0.5 hover:border-emerald-400/40 active:scale-[.97]">
-                <span className={cn("absolute right-2 top-2 rounded-md bg-black/50 px-1.5 py-0.5 text-[10px]", prod.stock <= prod.stock_minimo ? "text-red-400" : "text-slate-300")}>
-                  Stock: {prod.stock}
-                </span>
-                <div className="grid h-24 place-items-center text-6xl transition group-hover:scale-110">{prod.emoji}</div>
-                <p className="mt-2 text-sm font-medium">{prod.nombre}</p>
-                <p className="font-semibold text-emerald-400">{formatARS(prod.precio_venta)}</p>
-              </button>
-            ))}
-            {!lista.length && (
-              <p className="col-span-3 py-10 text-center text-slate-500">
-                {productos.length ? "Sin resultados" : "Todavía no hay productos. Cargalos desde Inventario."}
-              </p>
-            )}
-          </div>
-        </div>
-      </section>
-
-      <aside className="flex min-h-0 flex-col gap-3">
-        <div className="panel flex min-h-0 flex-1 flex-col p-4">
-          <div className="mb-3 flex items-center justify-between">
-            <h2 className="font-semibold">El Ticket</h2>
-            <button onClick={clear} className="text-slate-500 hover:text-red-400" aria-label="Vaciar"><Trash2 className="size-4" /></button>
-          </div>
-          <div className="ticket scroll-thin min-h-0 flex-1 overflow-y-auto px-4 pb-6 pt-4">
-            {!items.length && <p className="py-8 text-center text-sm text-slate-400">Escaneá o elegí un producto</p>}
-            {items.map(({ producto, cantidad }) => (
-              <div key={producto.id} className="pop flex items-center gap-2 border-t border-dashed border-slate-300 py-2.5">
-                <div className="flex items-center rounded-md bg-slate-200 text-xs font-semibold">
-                  <button onClick={() => setCantidad(producto.id, cantidad - 1)} className="px-1.5 py-1" aria-label="Menos"><Minus className="size-3" /></button>
-                  <span className="min-w-5 text-center">{cantidad}x</span>
-                  <button onClick={() => setCantidad(producto.id, cantidad + 1)} className="px-1.5 py-1" aria-label="Más"><Plus className="size-3" /></button>
+          {/* Panel de cobro, cálculo de vuelto y botón de acción */}
+          <div className="panel p-3 space-y-2.5">
+            {pago === "cuenta_corriente" ? (
+              <select 
+                value={clienteId} 
+                onChange={(e) => setClienteId(e.target.value)}
+                className="w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-xs outline-none focus:border-emerald-400 text-white"
+              >
+                <option value="">Elegí el cliente fiado...</option>
+                {clientes.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+              </select>
+            ) : (
+              <div className="flex items-center justify-between gap-3">
+                <label className="flex-1 text-[11px] text-slate-400 font-medium">
+                  Paga con:
+                  <input 
+                    value={recibido} 
+                    onChange={(e) => setRecibido(e.target.value.replace(/\D/g, ""))}
+                    disabled={pago !== "efectivo"} 
+                    placeholder="$0" 
+                    inputMode="numeric"
+                    className="mt-1 w-full rounded-xl border border-white/10 bg-black/40 px-3 py-1.5 text-base font-bold text-white outline-none focus:border-emerald-400 disabled:opacity-40" 
+                  />
+                </label>
+                <div className="pt-4 text-right">
+                  <span className="text-[10px] text-slate-400 block">Vuelto:</span>
+                  <b className={cn("text-lg", vuelto > 0 ? "text-emerald-400" : "text-slate-300")}>
+                    {formatARS(vuelto)}
+                  </b>
                 </div>
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-semibold">{producto.nombre}</p>
-                  <p className="text-[11px] text-slate-500">({formatARS(producto.precio_venta)})</p>
-                </div>
-                <span className="text-sm font-medium">{formatARS(producto.precio_venta * cantidad)}</span>
-                <button onClick={() => remove(producto.id)} className="text-slate-400 hover:text-red-500" aria-label="Quitar"><Trash2 className="size-3.5" /></button>
               </div>
-            ))}
-          </div>
-          <p className={cn("glow-total mt-4 text-center text-4xl font-extrabold tracking-tight transition", flash && "scale-105")}>
-            TOTAL: {formatARS(totalVenta)}
-          </p>
-          <div className="mt-3 grid grid-cols-4 gap-2">
-            {PAGOS.map(({ id, key, label, icon: Icon }) => (
-              <button key={id} onClick={() => setPago(id)}
-                className={cn("flex flex-col items-center gap-1 rounded-xl border p-2 text-[10px] transition",
-                  pago === id ? "border-emerald-400 bg-emerald-500/15 text-emerald-300" : "border-white/10 bg-white/5 text-slate-400 hover:bg-white/10")}>
-                <Icon className="size-4" /> {key} {label}
-              </button>
-            ))}
-          </div>
-        </div>
+            )}
 
-        <div className="panel p-3">
-          {pago === "cuenta_corriente" ? (
-            <select value={clienteId} onChange={(e) => setClienteId(e.target.value)}
-              className="w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-sm outline-none focus:border-emerald-400">
-              <option value="">Elegí el cliente...</option>
-              {clientes.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
-            </select>
-          ) : (
-            <div className="flex items-center justify-between gap-3">
-              <label className="flex-1 text-[11px] text-slate-500">
-                Paga con:
-                <input value={recibido} onChange={(e) => setRecibido(e.target.value.replace(/\D/g, ""))}
-                  disabled={pago !== "efectivo"} placeholder="$0" inputMode="numeric"
-                  className="mt-1 w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-base text-white outline-none focus:border-emerald-400 disabled:opacity-40" />
-              </label>
-              <p className="pt-4 text-xl">Vuelto: <b className={vuelto > 0 ? "text-emerald-400" : ""}>{formatARS(vuelto)}</b></p>
-            </div>
-          )}
-          <button onClick={cobrar} disabled={pending}
-            className="mt-3 w-full rounded-xl bg-gradient-to-r from-emerald-500 to-teal-400 py-3 font-bold text-slate-950 transition hover:brightness-110 active:scale-[.98] disabled:opacity-50">
-            {pending ? "Procesando..." : "COBRAR (F9)"}
-          </button>
-        </div>
-      </aside>
+            <button 
+              onClick={cobrar} 
+              disabled={pending}
+              className="w-full rounded-xl bg-gradient-to-r from-emerald-500 to-teal-400 py-3 font-extrabold text-slate-950 transition hover:brightness-110 active:scale-[0.98] disabled:opacity-50 text-sm shadow-lg shadow-emerald-500/20"
+            >
+              {pending ? "Procesando venta..." : `COBRAR (${formatARS(totalVenta)})`}
+            </button>
+          </div>
+        </aside>
+      </div>
+
       {camara && <CameraScanner continuo onDetect={onScan} onClose={() => setCamara(false)} />}
     </div>
   );

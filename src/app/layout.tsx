@@ -18,6 +18,15 @@ export const metadata: Metadata = {
   description: "POS ultrarrápido, inventario, caja y cuenta corriente para kioscos y minimarkets.",
 };
 
+export const viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
+  viewportFit: "cover",
+  themeColor: "#0b1020",
+};
+
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html

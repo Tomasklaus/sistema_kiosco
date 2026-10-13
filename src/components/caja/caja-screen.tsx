@@ -83,29 +83,29 @@ export function CajaScreen({ caja }: { caja: CajaData | null }) {
 
   return (
     <div className="flex h-full flex-col gap-4">
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
         {kpis.map((x) => (
-          <div key={x.t} className={cn("rounded-2xl border bg-gradient-to-br p-5", x.c)}>
-            <p className="text-xs uppercase tracking-wider opacity-70">{x.t}</p>
-            <p className="mt-2 text-2xl font-bold">{formatARS(x.v)}</p>
+          <div key={x.t} className={cn("rounded-2xl border bg-gradient-to-br p-3.5 sm:p-5", x.c)}>
+            <p className="text-[10px] sm:text-xs uppercase tracking-wider opacity-70 font-semibold">{x.t}</p>
+            <p className="mt-1 sm:mt-2 text-xl sm:text-2xl font-bold truncate">{formatARS(x.v)}</p>
           </div>
         ))}
       </div>
 
-      <div className="panel flex items-center justify-between border-emerald-400/30 px-6 py-4">
+      <div className="panel flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-emerald-400/30 p-4 sm:px-6 sm:py-4">
         <div>
-          <p className="text-xs uppercase tracking-wider text-slate-400">Efectivo esperado en caja</p>
-          <p className="glow-total text-4xl font-extrabold">{formatARS(k.esperado)}</p>
-          <p className="text-xs text-slate-500">Fondo + ventas en efectivo − egresos</p>
+          <p className="text-[10px] sm:text-xs uppercase tracking-wider text-slate-400 font-semibold">Efectivo esperado en caja</p>
+          <p className="glow-total text-3xl sm:text-4xl font-extrabold">{formatARS(k.esperado)}</p>
+          <p className="text-[11px] text-slate-500">Fondo + ventas en efectivo − egresos</p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap sm:flex-nowrap items-center gap-2 sm:gap-3 w-full sm:w-auto">
           <button onClick={() => setPanel(panel === "gasto" ? "none" : "gasto")}
-            className="flex items-center gap-2 rounded-xl border border-white/15 bg-white/5 px-5 py-3 text-sm font-medium hover:bg-white/10">
+            className="flex-1 sm:flex-initial flex items-center justify-center gap-2 rounded-xl border border-white/15 bg-white/5 px-4 py-2.5 text-xs sm:text-sm font-medium hover:bg-white/10 transition">
             <MinusCircle className="size-4" /> Registrar Gasto
           </button>
           <button onClick={() => setPanel(panel === "arqueo" ? "none" : "arqueo")}
-            className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-400 px-6 py-3 text-sm font-bold text-slate-950 hover:brightness-110">
-            <Lock className="size-4" /> Cerrar Turno / Hacer Arqueo
+            className="flex-1 sm:flex-initial flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-400 px-4 py-2.5 text-xs sm:text-sm font-bold text-slate-950 hover:brightness-110 transition">
+            <Lock className="size-4" /> Arqueo / Cierre
           </button>
         </div>
       </div>

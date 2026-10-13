@@ -59,8 +59,8 @@ export function ClientesScreen({ clientes }: { clientes: ClienteConMovs[] }) {
   };
 
   return (
-    <div className="grid h-full grid-cols-[320px_1fr] gap-4">
-      <aside className="panel flex min-h-0 flex-col p-3">
+    <div className="grid h-full grid-cols-1 md:grid-cols-[300px_1fr] lg:grid-cols-[340px_1fr] gap-4">
+      <aside className="panel flex min-h-[300px] md:min-h-0 flex-col p-3">
         <div className="mb-3 flex items-center gap-2 rounded-lg bg-black/30 px-3 py-2">
           <Search className="size-4 text-slate-500" />
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar cliente..." className="flex-1 bg-transparent text-sm outline-none" />

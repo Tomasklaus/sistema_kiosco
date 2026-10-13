@@ -254,30 +254,30 @@ export function InventarioScreen({ productos, categorias, codigoInicial }: {
       )}
 
       {nuevo && (
-        <div className="panel flex flex-col gap-2 border-emerald-400/30 px-4 py-3">
-          <div className="flex items-center justify-between pb-1">
+        <div className="panel flex flex-col gap-3 border-emerald-400/30 p-3 sm:p-4">
+          <div className="flex items-center justify-between pb-1 border-b border-white/5">
             <span className="text-xs font-semibold uppercase tracking-wider text-emerald-400">Dar de alta producto con código</span>
             <button onClick={() => setNuevo(false)} className="text-slate-400 hover:text-white"><X className="size-4" /></button>
           </div>
-          <div className="grid grid-cols-6 items-center gap-2">
-            <div className="relative col-span-2 flex items-center">
-              <input placeholder="Código de barras (escanear o escribir)" value={form.codigo}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 items-center gap-2.5">
+            <div className="relative col-span-1 sm:col-span-2 flex items-center">
+              <input placeholder="Código de barras" value={form.codigo}
                 onChange={(e) => setForm({ ...form, codigo: e.target.value })} className={cn(input, "w-full pr-16 font-mono")} />
               <div className="absolute right-1 flex items-center gap-1">
                 <button type="button" onClick={() => setCamaraTarget("nuevo")} title="Escanear con cámara" className="rounded p-1 text-slate-400 hover:text-emerald-300"><Camera className="size-4" /></button>
                 <button type="button" onClick={autogenerarCodigo} title="Generar código interno automático (EAN-13)" className="rounded p-1 text-slate-400 hover:text-amber-300"><Sparkles className="size-4" /></button>
               </div>
             </div>
-            <input placeholder="Nombre del producto" value={form.nombre} onChange={(e) => setForm({ ...form, nombre: e.target.value })} className={cn(input, "col-span-2")} />
+            <input placeholder="Nombre del producto" value={form.nombre} onChange={(e) => setForm({ ...form, nombre: e.target.value })} className={cn(input, "col-span-1 sm:col-span-2")} />
             <input placeholder="Costo ($)" value={form.costo} onChange={(e) => setForm({ ...form, costo: e.target.value.replace(/\D/g, "") })} className={input} />
             <input placeholder="Venta ($)" value={form.venta} onChange={(e) => setForm({ ...form, venta: e.target.value.replace(/\D/g, "") })} className={input} />
             <input placeholder="Stock inicial" value={form.stock} onChange={(e) => setForm({ ...form, stock: e.target.value.replace(/\D/g, "") })} className={input} />
             <input placeholder="Stock mínimo" value={form.minimo} onChange={(e) => setForm({ ...form, minimo: e.target.value.replace(/\D/g, "") })} className={input} />
-            <select value={form.cat} onChange={(e) => setForm({ ...form, cat: e.target.value })} className={cn(input, "col-span-2")}>
+            <select value={form.cat} onChange={(e) => setForm({ ...form, cat: e.target.value })} className={cn(input, "col-span-1 sm:col-span-2")}>
               <option value="">Sin categoría</option>
               {categorias.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
             </select>
-            <button onClick={crear} disabled={pending} className="col-span-2 rounded-lg bg-emerald-500 py-2 text-sm font-semibold text-slate-950 hover:brightness-110 disabled:opacity-50">Guardar producto</button>
+            <button onClick={crear} disabled={pending} className="col-span-1 sm:col-span-2 rounded-lg bg-emerald-500 py-2.5 text-sm font-semibold text-slate-950 hover:brightness-110 disabled:opacity-50">Guardar producto</button>
           </div>
         </div>
       )}
