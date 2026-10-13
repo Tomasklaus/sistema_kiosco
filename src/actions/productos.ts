@@ -32,11 +32,13 @@ export async function crearProducto(input: {
 }
 
 export async function actualizarProducto(
-  id: string, campos: { precio_venta?: number; stock?: number }
+  id: string, campos: { precio_venta?: number; stock?: number; codigo_barras?: string | null }
 ): Promise<ActionResult> {
   const supabase = await createClient();
-  const { error } = await supabase.from("productos").update({ ...campos, updated_at: new Date().toISOString() }).eq("id", id);
-  if (error) return { ok: false, error: error.message };
+  const payload = { ...campos };
+  if ("codigo_barras" in payload) payload.codigo_barras = payload.codigo_barras?.trim() || null;
+  const { error } = await supabase.from("productos").update({ ...payload, updated_at: new Date().toISOString() }).eq("id", id);
+  if (error) return { ok: false, error: error.code === "23505" ? "Ya existe un producto con ese código" : error.message };
   revalidatePath("/", "layout");
   return { ok: true };
 }

@@ -2,12 +2,14 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Banknote, BookUser, CreditCard, Handshake, Lock, Minus, Plus, Radio, Search, Trash2 } from "lucide-react";
+import { Banknote, BookUser, Camera, CreditCard, Handshake, Lock, Minus, Plus, Radio, Search, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { registrarVenta } from "@/actions/ventas";
 import { abrirTurno } from "@/actions/caja";
 import { useCartStore } from "@/stores/cart-store";
 import { useBarcodeScanner } from "@/hooks/use-barcode-scanner";
+import { CameraScanner } from "@/components/barcode/camera-scanner";
+import { beepError, beepOk, buscarPorCodigo, normalizarCodigo } from "@/lib/barcode";
 import { cn, formatARS } from "@/lib/utils";
 import type { MetodoPago, ProductoUI } from "@/types";
 
@@ -37,6 +39,9 @@ export function PosScreen({ productos, turnoAbierto, clientes }: {
   const [clienteId, setClienteId] = useState("");
   const [fondo, setFondo] = useState("");
   const [flash, setFlash] = useState(false);
+  const [camara, setCamara] = useState(false);
+  const [lectura, setLectura] = useState(false);
+  const [ultimo, setUltimo] = useState<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
 
   const totalVenta = total();
@@ -55,11 +60,35 @@ export function PosScreen({ productos, turnoAbierto, clientes }: {
     setTimeout(() => setFlash(false), 150);
   }, [add]);
 
-  const onScan = useCallback((code: string) => {
-    const prod = productos.find((x) => x.codigo_barras === code);
-    if (prod) { agregar(prod); setQuery(""); } else toast.error(`Código ${code} no encontrado`);
-  }, [agregar, productos]);
-  useBarcodeScanner(onScan);
+  const onScan = useCallback((raw: string) => {
+    const code = normalizarCodigo(raw);
+    setQuery(""); // el lector tipea en el buscador si está enfocado: se limpia siempre
+    setLectura(true);
+    setTimeout(() => setLectura(false), 400);
+    const prod = buscarPorCodigo(productos, code);
+    if (!prod) {
+      beepError();
+      setUltimo(null);
+      toast.error(`Código ${code} no encontrado`, {
+        action: { label: "Crear producto", onClick: () => router.push(`/inventario?codigo=${encodeURIComponent(code)}`) },
+      });
+      return;
+    }
+    beepOk();
+    agregar(prod);
+    setUltimo(prod.nombre);
+    if (prod.stock <= 0) toast.warning(`${prod.nombre} figura sin stock`);
+  }, [agregar, productos, router]);
+  useBarcodeScanner(onScan, { enabled: turnoAbierto && !camara });
+
+  const buscarEnter = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key !== "Enter" || !query.trim()) return;
+    // Código tipeado a mano (o lector sin ráfaga): coincidencia exacta, o único resultado.
+    const porCodigo = buscarPorCodigo(productos, query);
+    const unico = lista.length === 1 ? lista[0] : undefined;
+    const prod = porCodigo ?? unico;
+    if (prod) { agregar(prod); setUltimo(prod.nombre); setQuery(""); }
+  };
 
   const cobrar = useCallback(() => {
     if (!items.length) return toast.error("El ticket está vacío");
@@ -118,11 +147,17 @@ export function PosScreen({ productos, turnoAbierto, clientes }: {
       <section className="flex min-h-0 flex-col gap-4">
         <div className="panel flex items-center gap-3 px-4 py-3">
           <Search className="size-5 text-slate-500" />
-          <input ref={searchRef} value={query} onChange={(e) => setQuery(e.target.value)}
+          <input ref={searchRef} value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={buscarEnter}
             placeholder="F1 - Buscar producto o escanear código de barras..."
             className="flex-1 bg-transparent text-sm outline-none placeholder:text-slate-500" />
-          <span className="flex items-center gap-1.5 rounded-full bg-emerald-500/15 px-3 py-1 text-[11px] font-semibold text-emerald-400">
-            <Radio className="size-3 animate-pulse" /> LECTOR ACTIVO
+          {ultimo && <span className="max-w-48 truncate text-[11px] text-slate-400">Último: <b className="text-slate-200">{ultimo}</b></span>}
+          <button onClick={() => setCamara(true)} title="Escanear con la cámara"
+            className="flex items-center gap-1.5 rounded-full border border-white/10 px-3 py-1 text-[11px] font-semibold text-slate-300 transition hover:border-emerald-400/50 hover:text-emerald-300">
+            <Camera className="size-3.5" /> CÁMARA
+          </button>
+          <span className={cn("flex items-center gap-1.5 rounded-full px-3 py-1 text-[11px] font-semibold transition",
+            lectura ? "scale-110 bg-emerald-400 text-slate-950" : "bg-emerald-500/15 text-emerald-400")}>
+            <Radio className="size-3 animate-pulse" /> {lectura ? "LEÍDO" : "LECTOR ACTIVO"}
           </span>
         </div>
 
@@ -225,6 +260,7 @@ export function PosScreen({ productos, turnoAbierto, clientes }: {
           </button>
         </div>
       </aside>
+      {camara && <CameraScanner continuo onDetect={onScan} onClose={() => setCamara(false)} />}
     </div>
   );
 }
