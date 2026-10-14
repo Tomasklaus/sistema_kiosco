@@ -9,6 +9,7 @@ export interface Sesion {
   nombre: string | null;
   rol: RolUsuario;
   negocio: string;
+  activo: boolean;
 }
 
 export interface AlertaStock {
@@ -18,14 +19,24 @@ export interface AlertaStock {
   stock_minimo: number;
 }
 
-/** Devuelve null si no hay usuario o si su cuenta no tiene acceso a ningún negocio (p. ej. desactivada). */
+/**
+ * Devuelve null si no hay usuario autenticado o no existe perfil.
+ * Si el perfil está desactivado, igual se devuelve la sesión con activo=false
+ * para que el layout pueda bloquear el acceso.
+ */
 export async function obtenerSesion(): Promise<Sesion | null> {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return null;
+
   const { data } = await supabase
-    .from("profiles").select("nombre, rol, tenants(nombre)").eq("id", user.id).maybeSingle();
+    .from("profiles")
+    .select("nombre, rol, activo, tenant_id, tenants(nombre)")
+    .eq("id", user.id)
+    .maybeSingle();
+
   if (!data) return null;
+
   const tenant = data.tenants as unknown as { nombre: string } | null;
   return {
     id: user.id,
@@ -33,6 +44,7 @@ export async function obtenerSesion(): Promise<Sesion | null> {
     nombre: data.nombre,
     rol: data.rol as RolUsuario,
     negocio: tenant?.nombre ?? "Mi negocio",
+    activo: data.activo !== false,
   };
 }
 

@@ -1,14 +1,14 @@
 import { ReportesScreen } from "@/components/reportes/reportes-screen";
 import { obtenerReporte, type RangoId } from "@/actions/reportes";
 import { obtenerSesion } from "@/actions/sesion";
+import { esGestionEquipo } from "@/lib/permisos";
 import { redirect } from "next/navigation";
 
 const VALIDOS: RangoId[] = ["hoy", "ayer", "7d", "mes"];
 
 export default async function ReportesPage({ searchParams }: { searchParams: Promise<{ r?: string }> }) {
   const sesion = await obtenerSesion();
-  // Limitar visualización: los cajeros no pueden ver métricas financieras globales
-  if (sesion?.rol === "cajero") {
+  if (!sesion?.activo || !esGestionEquipo(sesion.rol)) {
     redirect("/pos");
   }
 

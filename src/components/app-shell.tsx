@@ -3,33 +3,34 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
-import { 
-  Bell, 
-  Boxes, 
-  FileText, 
-  Landmark, 
-  ShieldCheck, 
-  ShoppingCart, 
-  Users, 
-  UserCircle, 
-  LogOut, 
-  Store, 
+import {
+  Bell,
+  Boxes,
+  FileText,
+  Landmark,
+  ShieldCheck,
+  ShoppingCart,
+  Users,
+  UserCircle,
+  LogOut,
+  Store,
   Settings,
   Menu,
   X
 } from "lucide-react";
 import { logout } from "@/actions/auth";
+import { MODULOS_POR_ROL, ROL_LABEL } from "@/lib/permisos";
 import { cn } from "@/lib/utils";
 import type { RolUsuario } from "@/types";
 
 const todosLosLinks = [
-  { href: "/pos", label: "Ventas (POS)", icon: ShoppingCart, roles: ["owner", "admin", "cajero"] },
-  { href: "/inventario", label: "Inventario", icon: Boxes, roles: ["owner", "admin", "cajero"] },
-  { href: "/caja", label: "Caja", icon: Landmark, roles: ["owner", "admin", "cajero"] },
-  { href: "/clientes", label: "Clientes", icon: Users, roles: ["owner", "admin", "cajero"] },
-  { href: "/reportes", label: "Reportes", icon: FileText, roles: ["owner", "admin"] },
-  { href: "/equipo", label: "Mi Equipo", icon: Users, roles: ["owner", "admin"] },
-  { href: "/configuracion", label: "Configuración", icon: Settings, roles: ["owner", "admin"] },
+  { href: "/pos", label: "Ventas (POS)", icon: ShoppingCart },
+  { href: "/inventario", label: "Inventario", icon: Boxes },
+  { href: "/caja", label: "Caja", icon: Landmark },
+  { href: "/clientes", label: "Clientes", icon: Users },
+  { href: "/reportes", label: "Reportes", icon: FileText },
+  { href: "/equipo", label: "Mi Equipo", icon: Users },
+  { href: "/configuracion", label: "Configuración", icon: Settings },
 ];
 
 const titles: Record<string, string> = {
@@ -43,14 +44,14 @@ const titles: Record<string, string> = {
   "/admin": "Panel Admin Plataforma",
 };
 
-export function AppShell({ 
-  children, 
+export function AppShell({
+  children,
   esAdmin = false,
   rolUsuario = "owner",
   nombreUsuario = "Usuario",
   nombreNegocio = "Mi Kiosco"
-}: { 
-  children: React.ReactNode; 
+}: {
+  children: React.ReactNode;
   esAdmin?: boolean;
   rolUsuario?: RolUsuario;
   nombreUsuario?: string;
@@ -58,39 +59,37 @@ export function AppShell({
 }) {
   const path = usePathname();
 
-  // Filtrar enlaces visibles según el rol del empleado
-  const linksVisibles = todosLosLinks.filter(l => l.roles.includes(rolUsuario));
-  const navLinks = esAdmin 
-    ? [...linksVisibles, { href: "/admin", label: "Plataforma SuperAdmin", icon: ShieldCheck, roles: [] }] 
+  // Filtrar enlaces visibles según el rango (cajero: ventas, inventario, caja, clientes)
+  const linksVisibles = todosLosLinks.filter((l) =>
+    (MODULOS_POR_ROL[l.href] ?? []).includes(rolUsuario)
+  );
+  const navLinks = esAdmin
+    ? [...linksVisibles, { href: "/admin", label: "Plataforma SuperAdmin", icon: ShieldCheck }]
     : linksVisibles;
-  
+
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
-  
+
   const cerrarModales = () => {
     if (menuOpen) setMenuOpen(false);
     if (notifOpen) setNotifOpen(false);
   };
 
-  const rolLabel = {
-    owner: "Dueño",
-    admin: "Administrador",
-    cajero: "Cajero / Empleado",
-  }[rolUsuario] ?? rolUsuario;
+  const rolLabel = ROL_LABEL[rolUsuario] ?? rolUsuario;
 
   return (
     <div className="flex h-screen w-full overflow-hidden bg-[#0b1020]" onClick={cerrarModales}>
       {/* Backdrop para mobile drawer */}
       {mobileNavOpen && (
-        <div 
+        <div
           className="fixed inset-0 z-40 bg-black/70 backdrop-blur-xs md:hidden"
           onClick={() => setMobileNavOpen(false)}
         />
       )}
 
       {/* Sidebar: fija en escritorio, drawer deslizable en móvil */}
-      <aside 
+      <aside
         className={cn(
           "fixed inset-y-0 left-0 z-50 flex w-64 flex-col border-r border-white/5 bg-[#0e1426] p-4 transition-transform duration-300 ease-in-out md:static md:w-56 md:translate-x-0 md:shrink-0",
           mobileNavOpen ? "translate-x-0 shadow-2xl" : "-translate-x-full"
@@ -107,7 +106,7 @@ export function AppShell({
             </div>
           </div>
           {/* Botón cerrar en mobile */}
-          <button 
+          <button
             onClick={() => setMobileNavOpen(false)}
             className="rounded-lg p-1.5 text-slate-400 hover:text-white md:hidden"
             aria-label="Cerrar menú"
@@ -172,8 +171,8 @@ export function AppShell({
           <div className="flex items-center gap-2 md:gap-3 text-slate-400" onClick={e => e.stopPropagation()}>
             {/* Notificaciones */}
             <div className="relative">
-              <button 
-                className="relative rounded-xl p-2 hover:bg-white/5 focus:outline-none" 
+              <button
+                className="relative rounded-xl p-2 hover:bg-white/5 focus:outline-none"
                 aria-label="Notificaciones"
                 onClick={() => { setNotifOpen(!notifOpen); setMenuOpen(false); }}
               >
@@ -187,11 +186,11 @@ export function AppShell({
                 </div>
               )}
             </div>
-            
+
             {/* Menú de usuario */}
             <div className="relative">
-              <button 
-                className="rounded-xl bg-white/10 p-2 focus:outline-none hover:bg-white/20 transition flex items-center gap-2" 
+              <button
+                className="rounded-xl bg-white/10 p-2 focus:outline-none hover:bg-white/20 transition flex items-center gap-2"
                 aria-label="Usuario"
                 onClick={() => { setMenuOpen(!menuOpen); setNotifOpen(false); }}
               >
