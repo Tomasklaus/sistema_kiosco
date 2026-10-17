@@ -41,3 +41,17 @@ export function puedeInvitarAdmin(rol: RolUsuario): boolean {
 export function puedeEditarMiembros(rol: RolUsuario): boolean {
   return rol === "owner";
 }
+
+/**
+ * Edición completa de productos (nombre, costo, categoría, baja, etc.).
+ * El cajero ve el botón de edición en el POS pero con los campos de costo ocultos.
+ */
+export function puedeEditarProductos(rol: RolUsuario): boolean {
+  // Hoy todos los roles con acceso a inventario pueden editar; el cajero no ve costos.
+  return Boolean(rol);
+}
+
+/** Ver y editar costos/márgenes: sólo dueño y administrador. */
+export function puedeVerCostos(rol: RolUsuario): boolean {
+  return rol === "owner" || rol === "admin";
+}

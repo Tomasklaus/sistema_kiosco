@@ -1,19 +1,28 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
+import { useCallback, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Camera, Database, Plus, Printer, Search, Sparkles, TrendingUp, X } from "lucide-react";
+import { Camera, Database, Pencil, Plus, Printer, Search, Star, TrendingUp, X } from "lucide-react";
 import { toast } from "sonner";
-import { actualizarProducto, aplicarAumentoCategoria, cargarDatosDemo, crearProducto } from "@/actions/productos";
+import { actualizarProducto, aplicarAumentoCategoria, cargarDatosDemo } from "@/actions/productos";
 import { useBarcodeScanner } from "@/hooks/use-barcode-scanner";
 import { CameraScanner } from "@/components/barcode/camera-scanner";
-import { beepError, beepOk, buscarPorCodigo, generarCodigoInterno, imprimirEtiquetas, normalizarCodigo } from "@/lib/barcode";
+import { EmojiPicker } from "@/components/inventario/emoji-picker";
+import { ProductoFormModal } from "@/components/inventario/producto-form-modal";
+import { beepError, beepOk, buscarPorCodigo, imprimirEtiquetas, normalizarCodigo } from "@/lib/barcode";
+import { EMOJI_FALLBACK, EMOJI_POR_CATEGORIA } from "@/lib/producto-ui";
 import { cn, formatARS } from "@/lib/utils";
 import type { ProductoUI } from "@/types";
 
-type Campo = "precio_venta" | "stock";
 type Cat = { id: string; nombre: string };
 
+/** Emoji que vería el producto si no tuviera uno propio (según su categoría). */
+function emojiSugerido(categorias: Cat[], categoriaId: string | null): string {
+  const nombre = categorias.find((c) => c.id === categoriaId)?.nombre;
+  return (nombre && EMOJI_POR_CATEGORIA[nombre]) || EMOJI_FALLBACK;
+}
+
+/** Celda numérica: admite decimales (costo, precios, stock). */
 function EditableCell({ value, money, onSave }: { value: number; money?: boolean; onSave: (v: number) => void }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
@@ -36,6 +45,61 @@ function EditableCell({ value, money, onSave }: { value: number; money?: boolean
     </button>
   );
 }
+
+/** Celda de texto: clic para editar el nombre del producto. */
+function EditableText({ value, onSave, className }: { value: string; onSave: (v: string) => void; className?: string }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  if (editing) {
+    return (
+      <input autoFocus value={draft} maxLength={120}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={() => setEditing(false)}
+        onKeyDown={(e) => {
+          if (e.key === "Escape") setEditing(false);
+          if (e.key === "Enter") {
+            const limpio = draft.trim();
+            setEditing(false);
+            if (!limpio) return toast.error("El nombre no puede quedar vacío");
+            if (limpio !== value) onSave(limpio);
+          }
+        }}
+        className={cn("w-44 rounded-md border border-emerald-400 bg-black/40 px-2 py-1 text-sm outline-none", className)} />
+    );
+  }
+  return (
+    <button onClick={() => { setDraft(value); setEditing(true); }} title="Clic para editar el nombre"
+      className={cn("rounded-md px-1 -mx-1 py-0.5 text-left transition hover:bg-white/10", className)}>
+      {value}
+    </button>
+  );
+}
+
+/** Celda de categoría: cambia la categoría del producto desde la tabla. */
+function CategoryCell({ value, categorias, onSave }: {
+  value: string | null; categorias: Cat[]; onSave: (id: string | null) => void;
+}) {
+  return (
+    <select value={value ?? ""} onChange={(e) => onSave(e.target.value || null)}
+      title="Cambiar categoría"
+      className="rounded-md border border-transparent bg-black/30 px-1.5 py-1 text-xs text-slate-300 outline-none transition hover:border-white/10 focus:border-emerald-400">
+      <option value="">Sin categoría</option>
+      {categorias.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+    </select>
+  );
+}
+
+/** Interruptor de "acceso rápido" (favoritos del POS). */
+function FavoriteToggle({ value, onToggle }: { value: boolean; onToggle: () => void }) {
+  return (
+    <button onClick={onToggle} title={value ? "Quitar de acceso rápido" : "Agregar a acceso rápido"}
+      aria-pressed={value}
+      className={cn("rounded-md p-1 transition hover:bg-white/10", value ? "text-amber-300" : "text-slate-600 hover:text-slate-300")}>
+      <Star className={cn("size-4", value && "fill-amber-300")} />
+    </button>
+  );
+}
+
 
 /** Celda de código: clic para escribirlo o escanearlo y asignarlo al producto. */
 function CodeCell({ id, value, onSave, onCamera }: {
@@ -91,33 +155,25 @@ export function InventarioScreen({ productos, categorias, codigoInicial, ocultar
   const [aumento, setAumento] = useState(false);
   const [aumCat, setAumCat] = useState("");
   const [pct, setPct] = useState("10");
-  const [nuevo, setNuevo] = useState(Boolean(codigoInicial));
-  const [form, setForm] = useState({
-    codigo: codigoInicial ?? "",
-    nombre: "",
-    costo: "",
-    venta: "",
-    stock: "",
-    minimo: "5",
-    cat: ""
-  });
+  // Modal de alta/edición: "nuevo" | id del producto | null (cerrado)
+  const [formTarget, setFormTarget] = useState<"nuevo" | string | null>(codigoInicial ? "nuevo" : null);
+  // Código con el que se abre el alta (viene del lector o de la URL)
+  const [codigoAlta, setCodigoAlta] = useState(codigoInicial ?? "");
 
   // Modal de escáner con cámara en inventario
   const [camaraTarget, setCamaraTarget] = useState<"nuevo" | string | null>(null);
 
-  // Si se pasa un código inicial por querystring (desde el POS al no encontrar un producto)
-  useEffect(() => {
-    if (codigoInicial) {
-      setNuevo(true);
-      setForm((f) => ({ ...f, codigo: codigoInicial }));
-      toast.info(`Completá los datos para dar de alta el código ${codigoInicial}`);
-    }
-  }, [codigoInicial]);
+  // Selector de emoji para un producto ya existente
+  const [emojiTarget, setEmojiTarget] = useState<"nuevo" | string | null>(null);
 
+  // Si se pasa un código inicial por querystring (desde el POS al no encontrar un producto),
+  // el estado inicial del modal ya abre el alta precargada con ese código.
+
+  // Se puede filtrar por categoría por id o por nombre (como llega desde el POS)
   const lista = useMemo(() => productos.filter((p) => {
     if (q && !`${p.nombre} ${p.codigo_barras ?? ""}`.toLowerCase().includes(q.toLowerCase())) return false;
     if (soloBajo && p.stock > p.stock_minimo) return false;
-    if (cat !== "todas" && p.categoria_id !== cat) return false;
+    if (cat !== "todas" && p.categoria_id !== cat && (p.categoria ?? "").toLowerCase() !== cat.toLowerCase()) return false;
     return true;
   }), [productos, q, soloBajo, cat]);
 
@@ -134,33 +190,32 @@ export function InventarioScreen({ productos, categorias, codigoInicial, ocultar
       router.refresh();
     });
 
-  const editar = (id: string, campo: Campo, v: number) =>
+  const editar = (id: string, campo: "precio_costo" | "precio_venta" | "stock" | "stock_minimo", v: number) =>
     run(() => actualizarProducto(id, { [campo]: v }), "Guardado");
+
+  const renombrar = (id: string, nombre: string) =>
+    run(() => actualizarProducto(id, { nombre }), "Nombre actualizado");
+
+  const cambiarCategoria = (id: string, categoria_id: string | null) =>
+    run(() => actualizarProducto(id, { categoria_id }), "Categoría actualizada");
+
+  const toggleFavorito = (p: ProductoUI) =>
+    run(() => actualizarProducto(p.id, { acceso_rapido: !p.acceso_rapido }), p.acceso_rapido ? "Quitado de acceso rápido" : "Agregado a acceso rápido");
 
   const asignarCodigo = (id: string, codigo: string) =>
     run(() => actualizarProducto(id, { codigo_barras: codigo }), "Código de barras actualizado");
 
-  const crear = () => {
-    if (!form.nombre || !form.venta) return toast.error("Nombre y precio de venta son obligatorios");
-    run(() => crearProducto({
-      codigo_barras: form.codigo,
-      nombre: form.nombre,
-      precio_costo: Number(form.costo) || 0,
-      precio_venta: Number(form.venta),
-      stock: Number(form.stock) || 0,
-      stock_minimo: Number(form.minimo) || 0,
-      categoria_id: form.cat || null,
-    }), "Producto creado", () => {
-      setForm({ codigo: "", nombre: "", costo: "", venta: "", stock: "", minimo: "5", cat: "" });
-      setNuevo(false);
-    });
+  const asignarEmoji = (id: string, emoji: string | null) =>
+    run(() => actualizarProducto(id, { emoji }), emoji ? "Emoji actualizado" : "Emoji restablecido al de la categoría");
+
+  const abrirEdicion = (p: ProductoUI) => {
+    setCodigoAlta(p.codigo_barras ?? "");
+    setFormTarget(p.id);
   };
 
-  const autogenerarCodigo = () => {
-    const codigosExistentes = productos.map((p) => p.codigo_barras);
-    const nuevoCodigo = generarCodigoInterno(codigosExistentes);
-    setForm((f) => ({ ...f, codigo: nuevoCodigo }));
-    toast.success(`Código interno generado: ${nuevoCodigo}`);
+  const abrirAlta = (codigo = "") => {
+    setCodigoAlta(codigo);
+    setFormTarget("nuevo");
   };
 
   const aplicar = () => {
@@ -182,9 +237,9 @@ export function InventarioScreen({ productos, categorias, codigoInicial, ocultar
     const code = normalizarCodigo(raw);
     if (!code) return;
 
-    // Si ya estamos en el formulario de nuevo producto
-    if (nuevo) {
-      setForm((f) => ({ ...f, codigo: code }));
+    // Si el formulario de alta está abierto, completamos el código en el modal
+    if (formTarget === "nuevo") {
+      setCodigoAlta(code);
       beepOk();
       toast.success(`Código escaneado: ${code}`);
       return;
@@ -205,13 +260,12 @@ export function InventarioScreen({ productos, categorias, codigoInicial, ocultar
       toast.info(`Producto encontrado: ${existente.nombre}`);
     } else {
       beepError();
-      setForm({ codigo: code, nombre: "", costo: "", venta: "", stock: "", minimo: "5", cat: "" });
-      setNuevo(true);
+      abrirAlta(code);
       toast.info(`Código ${code} no existe. Listo para darlo de alta.`);
     }
-  }, [nuevo, productos]);
+  }, [formTarget, productos]);
 
-  useBarcodeScanner(onScanInventario, { enabled: !camaraTarget });
+  useBarcodeScanner(onScanInventario, { enabled: !camaraTarget && !emojiTarget && !formTarget });
 
   const input = "rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-sm outline-none focus:border-emerald-400";
 
@@ -231,7 +285,7 @@ export function InventarioScreen({ productos, categorias, codigoInicial, ocultar
           <option value="todas">Todas las categorías</option>
           {categorias.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
         </select>
-        <button onClick={() => setNuevo((v) => !v)} className="flex items-center gap-1.5 rounded-lg bg-emerald-500 px-4 py-2 text-sm font-semibold text-slate-950 hover:brightness-110">
+        <button onClick={() => abrirAlta()} className="flex items-center gap-1.5 rounded-lg bg-emerald-500 px-4 py-2 text-sm font-semibold text-slate-950 hover:brightness-110">
           <Plus className="size-4" /> Nuevo Producto
         </button>
         {!ocultarCostos && (
@@ -256,46 +310,22 @@ export function InventarioScreen({ productos, categorias, codigoInicial, ocultar
         </div>
       )}
 
-      {nuevo && (
-        <div className="panel flex flex-col gap-3 border-emerald-400/30 p-3 sm:p-4">
-          <div className="flex items-center justify-between pb-1 border-b border-white/5">
-            <span className="text-xs font-semibold uppercase tracking-wider text-emerald-400">Dar de alta producto con código</span>
-            <button onClick={() => setNuevo(false)} className="text-slate-400 hover:text-white"><X className="size-4" /></button>
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 items-center gap-2.5">
-            <div className="relative col-span-1 sm:col-span-2 flex items-center">
-              <input placeholder="Código de barras" value={form.codigo}
-                onChange={(e) => setForm({ ...form, codigo: e.target.value })} className={cn(input, "w-full pr-16 font-mono")} />
-              <div className="absolute right-1 flex items-center gap-1">
-                <button type="button" onClick={() => setCamaraTarget("nuevo")} title="Escanear con cámara" className="rounded p-1 text-slate-400 hover:text-emerald-300"><Camera className="size-4" /></button>
-                <button type="button" onClick={autogenerarCodigo} title="Generar código interno automático (EAN-13)" className="rounded p-1 text-slate-400 hover:text-amber-300"><Sparkles className="size-4" /></button>
-              </div>
-            </div>
-            <input placeholder="Nombre del producto" value={form.nombre} onChange={(e) => setForm({ ...form, nombre: e.target.value })} className={cn(input, "col-span-1 sm:col-span-2")} />
-            <input placeholder="Costo ($)" value={form.costo} onChange={(e) => setForm({ ...form, costo: e.target.value.replace(/\D/g, "") })} className={input} />
-            <input placeholder="Venta ($)" value={form.venta} onChange={(e) => setForm({ ...form, venta: e.target.value.replace(/\D/g, "") })} className={input} />
-            <input placeholder="Stock inicial" value={form.stock} onChange={(e) => setForm({ ...form, stock: e.target.value.replace(/\D/g, "") })} className={input} />
-            <input placeholder="Stock mínimo" value={form.minimo} onChange={(e) => setForm({ ...form, minimo: e.target.value.replace(/\D/g, "") })} className={input} />
-            <select value={form.cat} onChange={(e) => setForm({ ...form, cat: e.target.value })} className={cn(input, "col-span-1 sm:col-span-2")}>
-              <option value="">Sin categoría</option>
-              {categorias.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
-            </select>
-            <button onClick={crear} disabled={pending} className="col-span-1 sm:col-span-2 rounded-lg bg-emerald-500 py-2.5 text-sm font-semibold text-slate-950 hover:brightness-110 disabled:opacity-50">Guardar producto</button>
-          </div>
-        </div>
-      )}
 
       <div className="panel scroll-thin min-h-0 flex-1 overflow-auto">
         <table className="w-full text-sm">
           <thead className="sticky top-0 bg-[#131a2e] text-left text-[11px] uppercase tracking-wider text-slate-500">
             <tr>
+              <th className="px-2 py-3 text-center" title="Acceso rápido en el POS">★</th>
               <th className="px-4 py-3">Código</th>
               <th>Producto</th>
+              <th>Categoría</th>
               {!ocultarCostos && <th className="text-right">Costo</th>}
               <th className="text-right">Venta</th>
               {!ocultarCostos && <th className="text-right">Margen</th>}
               <th className="pl-6">Stock</th>
+              <th className="pl-4">Mín.</th>
               <th className="pr-4">Estado</th>
+              <th className="pr-2 text-center">Editar</th>
             </tr>
           </thead>
           <tbody>
@@ -303,6 +333,7 @@ export function InventarioScreen({ productos, categorias, codigoInicial, ocultar
               const margen = p.precio_venta ? ((p.precio_venta - p.precio_costo) / p.precio_venta) * 100 : 0;
               return (
                 <tr key={p.id} className="border-t border-white/5 hover:bg-white/[0.03]">
+                  <td className="px-2 py-2 text-center"><FavoriteToggle value={p.acceso_rapido} onToggle={() => toggleFavorito(p)} /></td>
                   <td className="px-4 py-2 font-mono text-xs">
                     <CodeCell
                       id={p.id}
@@ -311,19 +342,39 @@ export function InventarioScreen({ productos, categorias, codigoInicial, ocultar
                       onCamera={() => setCamaraTarget(p.id)}
                     />
                   </td>
-                  <td className="py-2 font-medium">{p.emoji} {p.nombre}</td>
-                  {!ocultarCostos && <td className="text-right text-slate-400">{formatARS(p.precio_costo)}</td>}
+                  <td className="py-2 font-medium">
+                    <div className="flex items-center gap-1">
+                      <button onClick={() => setEmojiTarget(p.id)} title="Cambiar emoji del producto"
+                        className="rounded-md px-1 py-0.5 text-base transition hover:bg-white/10">
+                        {p.emoji}
+                      </button>
+                      <EditableText value={p.nombre} onSave={(v) => renombrar(p.id, v)} className="max-w-[16rem] truncate" />
+                    </div>
+                  </td>
+                  <td className="py-2">
+                    <CategoryCell value={p.categoria_id} categorias={categorias} onSave={(v) => cambiarCategoria(p.id, v)} />
+                  </td>
+                  {!ocultarCostos && (
+                    <td className="pr-2 text-right text-slate-400"><EditableCell money value={p.precio_costo} onSave={(v) => editar(p.id, "precio_costo", v)} /></td>
+                  )}
                   <td className="text-right"><EditableCell money value={p.precio_venta} onSave={(v) => editar(p.id, "precio_venta", v)} /></td>
                   {!ocultarCostos && (
-                    <td className={cn("text-right font-medium", margen < 20 ? "text-amber-300" : "text-emerald-400")}>{margen.toFixed(0)}%</td>
+                    <td className={cn("pr-2 text-right font-medium", margen < 20 ? "text-amber-300" : "text-emerald-400")}>{margen.toFixed(0)}%</td>
                   )}
                   <td className="pl-6"><EditableCell value={p.stock} onSave={(v) => editar(p.id, "stock", v)} /></td>
+                  <td className="pl-4"><EditableCell value={p.stock_minimo} onSave={(v) => editar(p.id, "stock_minimo", v)} /></td>
                   <td className="pr-4"><StockBadge stock={p.stock} min={p.stock_minimo} /></td>
+                  <td className="pr-2 text-center">
+                    <button onClick={() => abrirEdicion(p)} title="Editar todos los datos del producto"
+                      className="rounded-md p-1.5 text-slate-400 transition hover:bg-emerald-500/15 hover:text-emerald-300">
+                      <Pencil className="size-4" />
+                    </button>
+                  </td>
                 </tr>
               );
             })}
             {!lista.length && (
-              <tr><td colSpan={7} className="py-12 text-center text-slate-500">
+              <tr><td colSpan={11} className="py-12 text-center text-slate-500">
                 {productos.length ? "Sin resultados" : (
                   <div className="space-y-3">
                     <p>Todavía no tenés productos.</p>
@@ -339,19 +390,40 @@ export function InventarioScreen({ productos, categorias, codigoInicial, ocultar
         </table>
       </div>
 
-      {camaraTarget && (
+      {emojiTarget && emojiTarget !== "nuevo" && (() => {
+        const producto = productos.find((p) => p.id === emojiTarget) ?? null;
+        return (
+          <EmojiPicker
+            titulo={producto?.nombre ?? "Producto"}
+            sugerido={emojiSugerido(categorias, producto?.categoria_id ?? null)}
+            actual={producto?.emoji ?? null}
+            onSelect={(emoji) => {
+              asignarEmoji(emojiTarget, emoji);
+              setEmojiTarget(null);
+            }}
+            onClose={() => setEmojiTarget(null)}
+          />
+        );
+      })()}
+
+      {camaraTarget && camaraTarget !== "nuevo" && (
         <CameraScanner
           onDetect={(code) => {
-            const normalizado = normalizarCodigo(code);
-            if (camaraTarget === "nuevo") {
-              setForm((f) => ({ ...f, codigo: normalizado }));
-              toast.success(`Código escaneado: ${normalizado}`);
-            } else {
-              asignarCodigo(camaraTarget, normalizado);
-            }
+            asignarCodigo(camaraTarget, normalizarCodigo(code));
             setCamaraTarget(null);
           }}
           onClose={() => setCamaraTarget(null)}
+        />
+      )}
+
+      {formTarget && (
+        <ProductoFormModal
+          producto={formTarget === "nuevo" ? null : productos.find((p) => p.id === formTarget) ?? null}
+          categorias={categorias}
+          codigoInicial={formTarget === "nuevo" ? codigoAlta : undefined}
+          ocultarCostos={ocultarCostos}
+          onClose={() => setFormTarget(null)}
+          onSaved={() => router.refresh()}
         />
       )}
     </div>

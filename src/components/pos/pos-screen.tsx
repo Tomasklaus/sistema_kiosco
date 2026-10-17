@@ -11,6 +11,7 @@ import {
   Lock, 
   Minus, 
   Plus, 
+  Pencil,
   Radio, 
   Search, 
   Trash2,
@@ -23,6 +24,7 @@ import { abrirTurno } from "@/actions/caja";
 import { useCartStore } from "@/stores/cart-store";
 import { useBarcodeScanner } from "@/hooks/use-barcode-scanner";
 import { CameraScanner } from "@/components/barcode/camera-scanner";
+import { ProductoFormModal } from "@/components/inventario/producto-form-modal";
 import { beepError, beepOk, buscarPorCodigo, normalizarCodigo } from "@/lib/barcode";
 import { cn, formatARS } from "@/lib/utils";
 import type { MetodoPago, ProductoUI } from "@/types";
@@ -41,8 +43,13 @@ const COLORES = [
   "from-green-500/25 to-green-500/5 border-green-400/30",
 ];
 
-export function PosScreen({ productos, turnoAbierto, clientes }: {
-  productos: ProductoUI[]; turnoAbierto: boolean; clientes: { id: string; nombre: string }[];
+export function PosScreen({ productos, categorias = [], turnoAbierto, clientes, puedeEditar = false }: {
+  productos: ProductoUI[];
+  categorias?: { id: string; nombre: string }[];
+  turnoAbierto: boolean;
+  clientes: { id: string; nombre: string }[];
+  /** Dueño/admin: pueden editar el producto directo desde el POS. */
+  puedeEditar?: boolean;
 }) {
   const router = useRouter();
   const [pending, startT] = useTransition();
@@ -60,6 +67,9 @@ export function PosScreen({ productos, turnoAbierto, clientes }: {
   
   // Vista en móvil: "catalogo" (para agregar productos) o "ticket" (para cobrar)
   const [vistaMobile, setVistaMobile] = useState<"catalogo" | "ticket">("catalogo");
+
+  // Edición rápida del producto desde el POS (dueño/admin)
+  const [editandoId, setEditandoId] = useState<string | null>(null);
   
   const searchRef = useRef<HTMLInputElement>(null);
 
@@ -248,10 +258,22 @@ export function PosScreen({ productos, turnoAbierto, clientes }: {
                     key={p.id} 
                     onClick={() => agregar(p)}
                     className={cn(
-                      "flex h-14 sm:h-16 flex-col justify-between rounded-xl border bg-gradient-to-br p-2 text-left text-xs sm:text-sm font-medium transition hover:-translate-y-0.5 active:scale-95", 
+                      "group relative flex h-14 sm:h-16 flex-col justify-between rounded-xl border bg-gradient-to-br p-2 text-left text-xs sm:text-sm font-medium transition hover:-translate-y-0.5 active:scale-95", 
                       COLORES[i % COLORES.length]
                     )}
                   >
+                    {puedeEditar && (
+                      <span role="button" tabIndex={0}
+                        onClick={(e) => { e.stopPropagation(); setEditandoId(p.id); }}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") { e.stopPropagation(); e.preventDefault(); setEditandoId(p.id); }
+                        }}
+                        title="Editar producto" aria-label={`Editar ${p.nombre}`}
+                        className="absolute right-1 top-1 rounded-md bg-black/50 p-1 text-white/70 opacity-0 transition hover:bg-emerald-500/30 hover:text-emerald-200 focus:opacity-100 group-hover:opacity-100"
+                      >
+                        <Pencil className="size-3" />
+                      </span>
+                    )}
                     <span className="text-base sm:text-lg leading-none">{p.emoji}</span>
                     <span className="truncate">{p.nombre}</span>
                   </button>
@@ -269,11 +291,25 @@ export function PosScreen({ productos, turnoAbierto, clientes }: {
                   onClick={() => agregar(prod)}
                   className="group relative flex flex-col justify-between rounded-xl border border-white/5 bg-white/[0.03] p-2.5 sm:p-3 text-left transition hover:-translate-y-0.5 hover:border-emerald-400/40 active:scale-[0.97]"
                 >
-                  <span className={cn(
-                    "self-end rounded-md bg-black/60 px-1.5 py-0.5 text-[9px] font-mono", 
-                    prod.stock <= prod.stock_minimo ? "text-red-400" : "text-slate-400"
-                  )}>
-                    Stock: {prod.stock}
+                  <span className="flex items-start justify-between gap-1">
+                    {puedeEditar && (
+                      <span role="button" tabIndex={0}
+                        onClick={(e) => { e.stopPropagation(); setEditandoId(prod.id); }}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") { e.stopPropagation(); e.preventDefault(); setEditandoId(prod.id); }
+                        }}
+                        title="Editar producto"
+                        className="rounded-md bg-black/50 p-1 text-slate-400 opacity-0 transition hover:bg-emerald-500/20 hover:text-emerald-300 focus:opacity-100 group-hover:opacity-100"
+                      >
+                        <Pencil className="size-3.5" />
+                      </span>
+                    )}
+                    <span className={cn(
+                      "ml-auto rounded-md bg-black/60 px-1.5 py-0.5 text-[9px] font-mono",
+                      prod.stock <= prod.stock_minimo ? "text-red-400" : "text-slate-400"
+                    )}>
+                      Stock: {prod.stock}
+                    </span>
                   </span>
                   
                   <div className="grid h-16 sm:h-20 place-items-center text-4xl sm:text-5xl transition group-hover:scale-110">
@@ -409,6 +445,19 @@ export function PosScreen({ productos, turnoAbierto, clientes }: {
       </div>
 
       {camara && <CameraScanner continuo onDetect={onScan} onClose={() => setCamara(false)} />}
+
+      {puedeEditar && editandoId && (() => {
+        const producto = productos.find((p) => p.id === editandoId) ?? null;
+        if (!producto) return null;
+        return (
+          <ProductoFormModal
+            producto={producto}
+            categorias={categorias}
+            onClose={() => setEditandoId(null)}
+            onSaved={() => router.refresh()}
+          />
+        );
+      })()}
     </div>
   );
 }

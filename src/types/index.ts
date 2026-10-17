@@ -21,6 +21,8 @@ export interface Producto {
   stock_minimo: number;
   acceso_rapido: boolean;
   activo: boolean;
+  /** Emoji propio del producto. `null` = usar el de su categoría. */
+  emoji: string | null;
 }
 
 export interface Cliente {
