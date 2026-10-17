@@ -4,10 +4,11 @@ import { useEffect, useState } from "react";
 import { Camera, Save, Smile, Sparkles, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { actualizarProducto, crearProducto, eliminarProducto } from "@/actions/productos";
+import { crearCategoria } from "@/actions/categorias";
 import { CameraScanner } from "@/components/barcode/camera-scanner";
 import { EmojiPicker } from "@/components/inventario/emoji-picker";
 import { generarCodigoInterno, normalizarCodigo } from "@/lib/barcode";
-import { EMOJI_FALLBACK, EMOJI_POR_CATEGORIA } from "@/lib/producto-ui";
+import { EMOJI_FALLBACK, EMOJI_POR_CATEGORIA, normalizarNombreCategoria } from "@/lib/producto-ui";
 import { cn, formatARS } from "@/lib/utils";
 import type { ProductoUI } from "@/types";
 
@@ -35,6 +36,9 @@ export function formDesdeProducto(p: ProductoUI | null, codigoInicial = ""): For
 
 const inputCls = "w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-sm outline-none focus:border-emerald-400";
 
+/** Valor centinela del `<select>` de categoría para dar de alta una nueva. */
+const NUEVA_CATEGORIA = "__nueva__";
+
 /** Modal para crear o editar un producto con todos sus campos. */
 export function ProductoFormModal({ producto, categorias, codigoInicial, ocultarCostos = false, onClose, onSaved }: {
   producto?: ProductoUI | null;
@@ -50,6 +54,8 @@ export function ProductoFormModal({ producto, categorias, codigoInicial, ocultar
   const [emojis, setEmojis] = useState(false);
   const [camara, setCamara] = useState(false);
   const [borrar, setBorrar] = useState(false);
+  // Categoría nueva escrita desde el propio formulario (se crea antes de guardar)
+  const [catNueva, setCatNueva] = useState("");
 
   const set = (parcial: Partial<FormProducto>) => setForm((f) => ({ ...f, ...parcial }));
 
@@ -71,8 +77,26 @@ export function ProductoFormModal({ producto, categorias, codigoInicial, ocultar
     if (!form.venta || Number(form.venta) < 0) return toast.error("Ingresá un precio de venta válido");
 
     setGuardando(true);
+
+    // Si eligió "+ Nueva categoría…", la creamos primero y usamos su id
+    let categoriaId: string | null = form.cat === NUEVA_CATEGORIA ? null : form.cat || null;
+    if (form.cat === NUEVA_CATEGORIA) {
+      const nombreCat = normalizarNombreCategoria(catNueva);
+      if (!nombreCat) {
+        setGuardando(false);
+        return toast.error("Escribí el nombre de la categoría nueva");
+      }
+      const rc = await crearCategoria({ nombre: nombreCat });
+      if (!rc.ok || !rc.data) {
+        setGuardando(false);
+        return toast.error(rc.error ?? "No se pudo crear la categoría");
+      }
+      categoriaId = rc.data.id;
+      toast.success(`Categoría "${rc.data.nombre}" creada`);
+    }
+
     const datos = {
-      categoria_id: form.cat || null,
+      categoria_id: categoriaId,
       nombre: form.nombre,
       precio_costo: Number(form.costo) || 0,
       precio_venta: Number(form.venta),
@@ -175,11 +199,24 @@ export function ProductoFormModal({ producto, categorias, codigoInicial, ocultar
 
             <label className="col-span-2 text-[11px] font-medium text-slate-400">
               Categoría
-              <select value={form.cat} onChange={(e) => set({ cat: e.target.value })} className={cn(inputCls, "mt-1")}>
+              <select value={form.cat} onChange={(e) => {
+                if (e.target.value === NUEVA_CATEGORIA) setCatNueva("");
+                set({ cat: e.target.value });
+              }} className={cn(inputCls, "mt-1")}>
                 <option value="">Sin categoría</option>
                 {categorias.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+                <option value={NUEVA_CATEGORIA}>+ Nueva categoría…</option>
               </select>
             </label>
+
+            {form.cat === NUEVA_CATEGORIA && (
+              <label className="col-span-2 text-[11px] font-medium text-slate-400">
+                Nombre de la nueva categoría
+                <input autoFocus value={catNueva} onChange={(e) => setCatNueva(e.target.value)} maxLength={40}
+                  placeholder="Ej. Librería"
+                  className={cn(inputCls, "mt-1")} />
+              </label>
+            )}
 
             <label className="col-span-2 flex cursor-pointer items-center gap-2 self-end rounded-lg border border-white/10 bg-black/20 px-3 py-2.5 text-xs font-medium text-slate-300 sm:col-span-2">
               <input type="checkbox" checked={form.favorito} onChange={(e) => set({ favorito: e.target.checked })}

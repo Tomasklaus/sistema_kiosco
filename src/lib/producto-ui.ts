@@ -41,6 +41,15 @@ export function normalizarNombreProducto(valor: string | null | undefined): stri
   return limpio ? limpio.slice(0, 120) : null;
 }
 
+/** Normaliza el nombre de una categoría: recorta espacios y devuelve `null` si queda vacío. */
+export function normalizarNombreCategoria(valor: string | null | undefined): string | null {
+  const limpio = (valor ?? "").replace(/\s+/g, " ").trim();
+  return limpio ? limpio.slice(0, 40) : null;
+}
+
+/** Emoji sugerido al dar de alta una categoría nueva. */
+export const EMOJI_CATEGORIA = "🏷️";
+
 /** Redondea a centavos evitando los decimales flotantes (12.3456 → 12.35). */
 export function redondearDinero(valor: number): number {
   return Math.round((Number.isFinite(valor) ? valor : 0) * 100) / 100;

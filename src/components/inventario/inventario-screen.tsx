@@ -2,19 +2,21 @@
 
 import { useCallback, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Camera, Database, Pencil, Plus, Printer, Search, Star, TrendingUp, X } from "lucide-react";
+import { Camera, Database, Pencil, Plus, Printer, Search, Star, Tag, TrendingUp, X } from "lucide-react";
 import { toast } from "sonner";
 import { actualizarProducto, aplicarAumentoCategoria, cargarDatosDemo } from "@/actions/productos";
+import { crearCategoria } from "@/actions/categorias";
 import { useBarcodeScanner } from "@/hooks/use-barcode-scanner";
 import { CameraScanner } from "@/components/barcode/camera-scanner";
+import { CategoriasModal } from "@/components/inventario/categorias-modal";
 import { EmojiPicker } from "@/components/inventario/emoji-picker";
 import { ProductoFormModal } from "@/components/inventario/producto-form-modal";
 import { beepError, beepOk, buscarPorCodigo, imprimirEtiquetas, normalizarCodigo } from "@/lib/barcode";
-import { EMOJI_FALLBACK, EMOJI_POR_CATEGORIA } from "@/lib/producto-ui";
+import { EMOJI_FALLBACK, EMOJI_POR_CATEGORIA, normalizarNombreCategoria } from "@/lib/producto-ui";
 import { cn, formatARS } from "@/lib/utils";
-import type { ProductoUI } from "@/types";
+import type { CategoriaConUso, ProductoUI } from "@/types";
 
-type Cat = { id: string; nombre: string };
+type Cat = { id: string; nombre: string; emoji?: string };
 
 /** Emoji que vería el producto si no tuviera uno propio (según su categoría). */
 function emojiSugerido(categorias: Cat[], categoriaId: string | null): string {
@@ -75,16 +77,58 @@ function EditableText({ value, onSave, className }: { value: string; onSave: (v:
   );
 }
 
-/** Celda de categoría: cambia la categoría del producto desde la tabla. */
-function CategoryCell({ value, categorias, onSave }: {
+const NUEVA_CATEGORIA = "__nueva__";
+
+/**
+ * Celda de categoría: cambia la categoría del producto desde la tabla.
+ * La última opción permite crear una categoría nueva sin salir de la fila.
+ */
+function CategoryCell({ value, categorias, onSave, onCrear }: {
   value: string | null; categorias: Cat[]; onSave: (id: string | null) => void;
+  onCrear: (nombre: string) => Promise<string | null>;
 }) {
+  const [creando, setCreando] = useState(false);
+  const [draft, setDraft] = useState("");
+
+  const confirmar = async () => {
+    const nombre = normalizarNombreCategoria(draft);
+    setCreando(false);
+    setDraft("");
+    if (!nombre) return;
+    const id = await onCrear(nombre);
+    if (id) onSave(id);
+  };
+
+  if (creando) {
+    return (
+      <span className="flex items-center gap-1">
+        <input autoFocus value={draft} placeholder="Nueva categoría" maxLength={40}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={() => setCreando(false)}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") setCreando(false);
+            if (e.key === "Enter") confirmar();
+          }}
+          className="w-32 rounded-md border border-emerald-400 bg-black/40 px-1.5 py-1 text-xs outline-none" />
+        <button onMouseDown={(e) => e.preventDefault()} onClick={confirmar} aria-label="Crear categoría"
+          className="rounded-md p-1 text-slate-400 hover:text-emerald-300"><Plus className="size-3.5" /></button>
+      </span>
+    );
+  }
+
   return (
-    <select value={value ?? ""} onChange={(e) => onSave(e.target.value || null)}
-      title="Cambiar categoría"
+    <select value={value ?? ""} title="Cambiar categoría"
+      onChange={(e) => {
+        if (e.target.value === NUEVA_CATEGORIA) {
+          setCreando(true);
+          return;
+        }
+        onSave(e.target.value || null);
+      }}
       className="rounded-md border border-transparent bg-black/30 px-1.5 py-1 text-xs text-slate-300 outline-none transition hover:border-white/10 focus:border-emerald-400">
       <option value="">Sin categoría</option>
       {categorias.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+      <option value={NUEVA_CATEGORIA}>+ Nueva categoría…</option>
     </select>
   );
 }
@@ -142,7 +186,7 @@ function StockBadge({ stock, min }: { stock: number; min: number }) {
 
 export function InventarioScreen({ productos, categorias, codigoInicial, ocultarCostos = false }: {
   productos: ProductoUI[];
-  categorias: Cat[];
+  categorias: CategoriaConUso[];
   codigoInicial?: string;
   ocultarCostos?: boolean;
 }) {
@@ -166,6 +210,9 @@ export function InventarioScreen({ productos, categorias, codigoInicial, ocultar
   // Selector de emoji para un producto ya existente
   const [emojiTarget, setEmojiTarget] = useState<"nuevo" | string | null>(null);
 
+  // Gestión de categorías (alta, renombrado, emoji y baja)
+  const [gestionCats, setGestionCats] = useState(false);
+
   // Si se pasa un código inicial por querystring (desde el POS al no encontrar un producto),
   // el estado inicial del modal ya abre el alta precargada con ese código.
 
@@ -177,7 +224,7 @@ export function InventarioScreen({ productos, categorias, codigoInicial, ocultar
     return true;
   }), [productos, q, soloBajo, cat]);
 
-  const run = (fn: () => Promise<{ ok: boolean; error?: string }>, okMsg: string, after?: () => void) =>
+  const run = useCallback((fn: () => Promise<{ ok: boolean; error?: string }>, okMsg: string, after?: () => void) =>
     start(async () => {
       const r = await fn();
       if (!r.ok) {
@@ -188,7 +235,7 @@ export function InventarioScreen({ productos, categorias, codigoInicial, ocultar
       toast.success(okMsg);
       after?.();
       router.refresh();
-    });
+    }), [router]);
 
   const editar = (id: string, campo: "precio_costo" | "precio_venta" | "stock" | "stock_minimo", v: number) =>
     run(() => actualizarProducto(id, { [campo]: v }), "Guardado");
@@ -202,11 +249,34 @@ export function InventarioScreen({ productos, categorias, codigoInicial, ocultar
   const toggleFavorito = (p: ProductoUI) =>
     run(() => actualizarProducto(p.id, { acceso_rapido: !p.acceso_rapido }), p.acceso_rapido ? "Quitado de acceso rápido" : "Agregado a acceso rápido");
 
-  const asignarCodigo = (id: string, codigo: string) =>
-    run(() => actualizarProducto(id, { codigo_barras: codigo }), "Código de barras actualizado");
+  const asignarCodigo = useCallback((id: string, codigo: string) =>
+    run(() => actualizarProducto(id, { codigo_barras: codigo }), "Código de barras actualizado"), [run]);
 
   const asignarEmoji = (id: string, emoji: string | null) =>
     run(() => actualizarProducto(id, { emoji }), emoji ? "Emoji actualizado" : "Emoji restablecido al de la categoría");
+
+  /** Crea una categoría desde inventario y devuelve su id (o `null` si falló). */
+  const crearCategoriaRapida = (nombre: string): Promise<string | null> => {
+    const yaExiste = categorias.find((c) => c.nombre.toLowerCase() === nombre.toLowerCase());
+    if (yaExiste) {
+      toast.info(`Ya existe la categoría "${yaExiste.nombre}"`);
+      return Promise.resolve(yaExiste.id);
+    }
+    return new Promise((resolve) => {
+      start(async () => {
+        const r = await crearCategoria({ nombre });
+        if (!r.ok || !r.data) {
+          beepError();
+          toast.error(r.error ?? "No se pudo crear la categoría");
+          return resolve(null);
+        }
+        beepOk();
+        toast.success(`Categoría "${r.data.nombre}" creada`);
+        router.refresh();
+        resolve(r.data.id);
+      });
+    });
+  };
 
   const abrirEdicion = (p: ProductoUI) => {
     setCodigoAlta(p.codigo_barras ?? "");
@@ -263,9 +333,9 @@ export function InventarioScreen({ productos, categorias, codigoInicial, ocultar
       abrirAlta(code);
       toast.info(`Código ${code} no existe. Listo para darlo de alta.`);
     }
-  }, [formTarget, productos]);
+  }, [formTarget, productos, asignarCodigo]);
 
-  useBarcodeScanner(onScanInventario, { enabled: !camaraTarget && !emojiTarget && !formTarget });
+  useBarcodeScanner(onScanInventario, { enabled: !camaraTarget && !emojiTarget && !formTarget && !gestionCats });
 
   const input = "rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-sm outline-none focus:border-emerald-400";
 
@@ -287,6 +357,11 @@ export function InventarioScreen({ productos, categorias, codigoInicial, ocultar
         </select>
         <button onClick={() => abrirAlta()} className="flex items-center gap-1.5 rounded-lg bg-emerald-500 px-4 py-2 text-sm font-semibold text-slate-950 hover:brightness-110">
           <Plus className="size-4" /> Nuevo Producto
+        </button>
+        <button onClick={() => setGestionCats(true)} title="Crear, renombrar o eliminar categorías"
+          className="flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm font-semibold text-slate-200 hover:bg-white/10">
+          <Tag className="size-4 text-emerald-400" /> Categorías
+          <span className="rounded-full bg-black/40 px-1.5 text-[11px] text-slate-400">{categorias.length}</span>
         </button>
         {!ocultarCostos && (
           <button onClick={() => setAumento((v) => !v)} className="flex items-center gap-1.5 rounded-lg bg-orange-500 px-4 py-2 text-sm font-semibold text-slate-950 hover:brightness-110">
@@ -352,7 +427,8 @@ export function InventarioScreen({ productos, categorias, codigoInicial, ocultar
                     </div>
                   </td>
                   <td className="py-2">
-                    <CategoryCell value={p.categoria_id} categorias={categorias} onSave={(v) => cambiarCategoria(p.id, v)} />
+                    <CategoryCell value={p.categoria_id} categorias={categorias} onSave={(v) => cambiarCategoria(p.id, v)}
+                      onCrear={crearCategoriaRapida} />
                   </td>
                   {!ocultarCostos && (
                     <td className="pr-2 text-right text-slate-400"><EditableCell money value={p.precio_costo} onSave={(v) => editar(p.id, "precio_costo", v)} /></td>
@@ -413,6 +489,14 @@ export function InventarioScreen({ productos, categorias, codigoInicial, ocultar
             setCamaraTarget(null);
           }}
           onClose={() => setCamaraTarget(null)}
+        />
+      )}
+
+      {gestionCats && (
+        <CategoriasModal
+          categorias={categorias}
+          onClose={() => setGestionCats(false)}
+          onSaved={() => router.refresh()}
         />
       )}
 

@@ -50,6 +50,16 @@ export interface ActionResult<T = undefined> {
 
 export type ProductoUI = Producto & { categoria: string | null; emoji: string };
 
+/** Categoría tal como se muestra en inventario: emoji por defecto y cantidad de productos. */
+export type CategoriaConUso = {
+  id: string;
+  nombre: string;
+  /** Cantidad de productos activos asignados. */
+  productos: number;
+  /** Emoji sugerido para sus productos (por nombre conocido o genérico). */
+  emoji: string;
+};
+
 export interface MovimientoCajaRow {
   id: string;
   tipo: "ingreso_venta" | "ingreso_cobro_deuda" | "ingreso_manual" | "egreso_proveedor" | "egreso_manual";

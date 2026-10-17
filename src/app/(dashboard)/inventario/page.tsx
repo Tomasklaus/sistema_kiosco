@@ -1,11 +1,12 @@
 import { InventarioScreen } from "@/components/inventario/inventario-screen";
-import { listarCategorias, listarProductos } from "@/actions/productos";
+import { listarCategoriasConUso } from "@/actions/categorias";
+import { listarProductos } from "@/actions/productos";
 import { obtenerSesion } from "@/actions/sesion";
 
 export default async function InventarioPage({ searchParams }: { searchParams: Promise<{ codigo?: string }> }) {
   const [productos, categorias, { codigo }, sesion] = await Promise.all([
     listarProductos(), 
-    listarCategorias(), 
+    listarCategoriasConUso(), 
     searchParams,
     obtenerSesion(),
   ]);

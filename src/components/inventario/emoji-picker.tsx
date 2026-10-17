@@ -10,8 +10,10 @@ import { cn } from "@/lib/utils";
  * Grilla de íconos típicos de kiosco + campo libre para pegar cualquier emoji.
  * `onSelect(null)` quita el emoji propio y vuelve al sugerido por la categoría.
  */
-export function EmojiPicker({ titulo, sugerido, actual, onSelect, onClose }: {
+export function EmojiPicker({ titulo, subtitulo, sugerido, actual, onSelect, onClose }: {
   titulo: string;
+  /** Encabezado del panel; por defecto "Emoji del producto". */
+  subtitulo?: string;
   /** Emoji que se mostrará si el producto queda sin emoji propio. */
   sugerido?: string | null;
   actual?: string | null;
@@ -48,7 +50,7 @@ export function EmojiPicker({ titulo, sugerido, actual, onSelect, onClose }: {
       <div ref={ref} className="panel pop w-full max-w-sm overflow-hidden">
         <div className="flex items-center justify-between border-b border-white/5 px-4 py-3">
           <div className="min-w-0">
-            <p className="text-sm font-semibold">Emoji del producto</p>
+            <p className="text-sm font-semibold">{subtitulo ?? "Emoji del producto"}</p>
             <p className="truncate text-xs text-slate-500">{titulo}</p>
           </div>
           <button onClick={onClose} aria-label="Cerrar" className="text-slate-400 hover:text-white"><X className="size-5" /></button>
