@@ -144,13 +144,13 @@ function rangoFechas(rango: RangoBitacora): { desde: Date; hasta: Date; anterior
   }
 }
 
-type MovRaw = Omit<MovimientoBitacora, "usuario" | "items"> & { items: unknown; perfiles?: { nombre: string | null; email: string | null } | null };
+type MovRaw = Omit<MovimientoBitacora, "usuario" | "items"> & { items: unknown };
 
-function normalizarMov(m: MovRaw): MovimientoBitacora {
+function normalizarMov(m: MovRaw, nombreDe: (id: string) => string): MovimientoBitacora {
   return {
     ...m,
     items: Array.isArray(m.items) ? (m.items as MovimientoBitacora["items"]) : null,
-    usuario: m.perfiles?.nombre || m.perfiles?.email || "Usuario",
+    usuario: nombreDe(m.usuario_id),
   };
 }
 
@@ -167,7 +167,10 @@ export async function obtenerBitacora(
 
   const supabase = await createClient();
   const { desde, hasta } = rangoFechas(rango);
-  const seleccion = "id, turno_id, created_at, tipo, metodo_pago, monto, descripcion, detalle, forma_pago, referencia, stock_involucrado, items, usuario_id, venta_id, perfiles!movimientos_caja_usuario_id_fkey!left(nombre, email)";
+  // Sin embebido de `perfiles`: el nombre del operador se resuelve aparte. Depender
+  // del nombre exacto de la FK o de la columna `email` hacía fallar toda la lectura
+  // y la bitácora se mostraba como "migración pendiente".
+  const seleccion = "id, turno_id, created_at, tipo, metodo_pago, monto, descripcion, detalle, forma_pago, referencia, stock_involucrado, items, usuario_id, venta_id";
 
   let consulta = supabase
     .from("movimientos_caja")
@@ -183,16 +186,20 @@ export async function obtenerBitacora(
     consulta,
     supabase
       .from("turnos_caja")
-      .select("id, abierto_at, cerrado_at, estado, monto_inicial, diferencia, usuario_apertura, perfiles!turnos_caja_usuario_apertura_fkey(nombre, email)")
+      .select("id, abierto_at, cerrado_at, estado, monto_inicial, diferencia, usuario_apertura")
       .gte("abierto_at", desde.toISOString())
       .lt("abierto_at", hasta.toISOString())
       .order("abierto_at", { ascending: false })
       .limit(200),
-    supabase.from("profiles").select("id, nombre, email, rol").order("nombre"),
+    supabase.from("profiles").select("id, nombre, rol").order("nombre"),
   ]);
 
   const migrado = !movs.error;
-  const filas = migrado ? (movs.data as unknown as MovRaw[]).map(normalizarMov) : [];
+  const nombres = new Map(
+    ((equipo.data ?? []) as { id: string; nombre: string | null }[]).map((p) => [p.id, p.nombre || "Usuario"]),
+  );
+  const nombreDe = (id: string) => nombres.get(id) ?? "Usuario";
+  const filas = migrado ? (movs.data as unknown as MovRaw[]).map((m) => normalizarMov(m, nombreDe)) : [];
   // Ingresos de stock de los turnos con egresos, para ofrecer el vínculo
   // "este egreso vino con mercadería" (no escribe nada hasta confirmarlo).
   const turnosDeEgresos = [...new Set(filas.filter((m) => m.tipo.startsWith("egreso")).map((m) => m.turno_id))].slice(0, 20);
@@ -220,29 +227,29 @@ export async function obtenerBitacora(
     { ingresos: 0, egresos: 0, egresosConStock: 0, cantidadMovimientos: 0 },
   );
 
-  const perfiles = (turnos.data ?? []) as unknown as {
+  const turnosRaw = (turnos.data ?? []) as unknown as {
     id: string; abierto_at: string; cerrado_at: string | null; estado: TurnoBitacora["estado"];
     monto_inicial: number; diferencia: number | null; usuario_apertura: string;
-    perfiles?: { nombre: string | null; email: string | null } | null;
   }[];
 
   return {
     rango,
     desde: desde.toISOString(),
     migrado,
+    error: movs.error?.message ?? null,
     movimientos: filas,
     ingresos,
-    turnos: perfiles.map((t) => ({
+    turnos: turnosRaw.map((t) => ({
       id: t.id,
       abierto_at: t.abierto_at,
       cerrado_at: t.cerrado_at,
       estado: t.estado,
       monto_inicial: Number(t.monto_inicial),
       diferencia: t.diferencia === null ? null : Number(t.diferencia),
-      usuario: t.perfiles?.nombre || t.perfiles?.email || "Usuario",
+      usuario: nombreDe(t.usuario_apertura),
     })),
-    operadores: ((equipo.data ?? []) as { id: string; nombre: string | null; email: string | null }[])
-      .map((p) => ({ id: p.id, nombre: p.nombre || p.email || "Usuario" })),
+    operadores: ((equipo.data ?? []) as { id: string; nombre: string | null }[])
+      .map((p) => ({ id: p.id, nombre: p.nombre || "Usuario" })),
     totales,
   };
 }

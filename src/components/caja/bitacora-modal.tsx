@@ -274,8 +274,9 @@ export function BitacoraModal({ inicial, onClose }: { inicial: BitacoraData | nu
         </div>
 
         {data && !data.migrado && (
-          <p className="border-b border-amber-400/20 bg-amber-400/10 px-4 py-2 text-[11px] text-amber-200">
-            Falta aplicar la migración <b>0008_bitacora_caja.sql</b> en Supabase: se ven los movimientos, pero todavía no el detalle de stock ni el vínculo con egresos.
+          <p className="border-b border-red-400/20 bg-red-400/10 px-4 py-2 text-[11px] text-red-200">
+            No se pudieron leer los movimientos de la bitácora.
+            {data.error ? <> Error de la base: <b>{data.error}</b></> : null}
           </p>
         )}
 
@@ -283,7 +284,11 @@ export function BitacoraModal({ inicial, onClose }: { inicial: BitacoraData | nu
         <div className="scroll-thin min-h-0 flex-1 overflow-y-auto px-3 py-3 sm:px-4">
           {!porDia.length && (
             <p className="py-10 text-center text-sm text-slate-500">
-              {cargando ? "Cargando…" : "No hay movimientos con estos filtros."}
+              {cargando
+                ? "Cargando…"
+                : data
+                  ? "No hay movimientos con estos filtros."
+                  : "No se pudo cargar la bitácora. Verificá tu sesión (la bitácora es sólo para dueño y administrador)."}
             </p>
           )}
 

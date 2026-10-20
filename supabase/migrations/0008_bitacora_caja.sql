@@ -86,7 +86,7 @@ begin
 
   return query
     select m.id, m.created_at, m.usuario_id,
-           coalesce(nullif(pf.nombre, ''), pf.email, 'Usuario'),
+           coalesce(nullif(pf.nombre, ''), 'Usuario'),
            m.descripcion, m.referencia, m.items
       from movimientos_caja m
       left join profiles pf on pf.id = m.usuario_id
@@ -463,7 +463,8 @@ begin
      set stock = coalesce(p.stock, 0) + s.cant, updated_at = now()
     from (select producto_id, sum(cantidad) as cant
             from venta_items where venta_id = v_venta.id group by 1) s
-   where p.id = s.producto_id;
+   where p.id = s.producto_id
+     and p.tenant_id = v_venta.tenant_id;
   perform set_config('kiosco.venta', '', true);
 
   update ventas set estado = 'anulada' where id = v_venta.id;

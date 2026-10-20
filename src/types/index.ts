@@ -135,8 +135,10 @@ export type RangoBitacora = "hoy" | "ayer" | "7d" | "mes" | "todo";
 export interface BitacoraData {
   rango: RangoBitacora;
   desde: string;
-  /** false = falta correr la migración 0008 (la bitácora igual se muestra). */
+  /** false = no se pudieron leer las columnas nuevas de la migración 0008. */
   migrado: boolean;
+  /** Mensaje de la base cuando la lectura falló (para diagnosticar). */
+  error?: string | null;
   movimientos: MovimientoBitacora[];
   /** Ingresos de stock de los turnos incluidos, agrupados por turno. */
   ingresos: IngresoStockRow[];
