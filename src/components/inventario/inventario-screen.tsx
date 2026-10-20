@@ -13,7 +13,7 @@ import { EmojiPicker } from "@/components/inventario/emoji-picker";
 import { ProductoFormModal } from "@/components/inventario/producto-form-modal";
 import { beepError, beepOk, buscarPorCodigo, imprimirEtiquetas, normalizarCodigo } from "@/lib/barcode";
 import { EMOJI_FALLBACK, EMOJI_POR_CATEGORIA, normalizarNombreCategoria } from "@/lib/producto-ui";
-import { cn, formatARS } from "@/lib/utils";
+import { cn, formatARS, formatCantidad, parseNumero } from "@/lib/utils";
 import type { CategoriaConUso, ProductoUI } from "@/types";
 
 type Cat = { id: string; nombre: string; emoji?: string };
@@ -24,26 +24,37 @@ function emojiSugerido(categorias: Cat[], categoriaId: string | null): string {
   return (nombre && EMOJI_POR_CATEGORIA[nombre]) || EMOJI_FALLBACK;
 }
 
+/** Lee el borrador de una celda numérica (admite "1.000" y "1,5"). */
+function numeroCelda(draft: string): number {
+  return Math.max(0, parseNumero(draft) ?? 0);
+}
+
 /** Celda numérica: admite decimales (costo, precios, stock). */
 function EditableCell({ value, money, onSave }: { value: number; money?: boolean; onSave: (v: number) => void }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
+  const guardar = () => {
+    // Sin número válido no se guarda nada (evita un 0 que borre el stock).
+    if (parseNumero(draft) === null) return setEditing(false);
+    onSave(numeroCelda(draft));
+    setEditing(false);
+  };
   if (editing) {
     return (
       <input autoFocus value={draft} inputMode="decimal"
-        onChange={(e) => setDraft(e.target.value.replace(/[^\d.]/g, ""))}
+        onChange={(e) => setDraft(e.target.value.replace(/[^\d.,]/g, ""))}
         onBlur={() => setEditing(false)}
         onKeyDown={(e) => {
           if (e.key === "Escape") setEditing(false);
-          if (e.key === "Enter") { onSave(Number(draft) || 0); setEditing(false); }
+          if (e.key === "Enter") { e.preventDefault(); guardar(); }
         }}
         className="w-24 rounded-md border border-emerald-400 bg-black/40 px-2 py-1 text-right text-sm outline-none" />
     );
   }
   return (
-    <button onClick={() => { setDraft(String(value)); setEditing(true); }} title="Clic para editar"
+    <button onClick={() => { setDraft(formatCantidad(value)); setEditing(true); }} title="Clic para editar"
       className="rounded-md px-2 py-1 transition hover:bg-white/10">
-      {money ? formatARS(value) : value}
+      {money ? formatARS(value) : formatCantidad(value)}
     </button>
   );
 }
@@ -291,7 +302,9 @@ export function InventarioScreen({ productos, categorias, codigoInicial, ocultar
   const aplicar = () => {
     const id = aumCat || categorias[0]?.id;
     if (!id) return toast.error("No hay categorías");
-    run(() => aplicarAumentoCategoria(id, Number(pct) || 0), `Aumento de ${pct}% aplicado`, () => setAumento(false));
+    const porcentaje = parseNumero(pct);
+    if (porcentaje === null || porcentaje <= 0) return toast.error("Ingresá un porcentaje válido");
+    run(() => aplicarAumentoCategoria(id, porcentaje), `Aumento de ${porcentaje}% aplicado`, () => setAumento(false));
   };
 
   const imprimirSeleccionadas = () => {
@@ -379,7 +392,7 @@ export function InventarioScreen({ productos, categorias, codigoInicial, ocultar
           <select value={aumCat || categorias[0]?.id || ""} onChange={(e) => setAumCat(e.target.value)} className={input}>
             {categorias.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
           </select>
-          <input value={pct} onChange={(e) => setPct(e.target.value.replace(/[^\d.]/g, ""))} className={cn(input, "w-20 text-right")} /> %
+          <input value={pct} onChange={(e) => setPct(e.target.value.replace(/[^\d.,]/g, ""))} inputMode="decimal" className={cn(input, "w-20 text-right")} /> %
           <button onClick={aplicar} disabled={pending} className="rounded-lg bg-orange-500 px-4 py-2 font-semibold text-slate-950 disabled:opacity-50">Aplicar</button>
           <button onClick={() => setAumento(false)} aria-label="Cerrar" className="ml-auto text-slate-500"><X className="size-4" /></button>
         </div>

@@ -1,15 +1,16 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Camera, Save, Smile, Sparkles, Trash2, X } from "lucide-react";
+import { Camera, Link2, Save, Smile, Sparkles, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { actualizarProducto, crearProducto, eliminarProducto } from "@/actions/productos";
 import { crearCategoria } from "@/actions/categorias";
 import { CameraScanner } from "@/components/barcode/camera-scanner";
 import { EmojiPicker } from "@/components/inventario/emoji-picker";
 import { generarCodigoInterno, normalizarCodigo } from "@/lib/barcode";
-import { EMOJI_FALLBACK, EMOJI_POR_CATEGORIA, normalizarNombreCategoria } from "@/lib/producto-ui";
-import { cn, formatARS } from "@/lib/utils";
+import { MOTIVOS_STOCK } from "@/lib/bitacora";
+import { EMOJI_FALLBACK, EMOJI_POR_CATEGORIA, normalizarNombreCategoria, redondearStock } from "@/lib/producto-ui";
+import { cn, formatARS, parseNumeroPositivo } from "@/lib/utils";
 import type { ProductoUI } from "@/types";
 
 type Cat = { id: string; nombre: string };
@@ -56,8 +57,20 @@ export function ProductoFormModal({ producto, categorias, codigoInicial, ocultar
   const [borrar, setBorrar] = useState(false);
   // Categoría nueva escrita desde el propio formulario (se crea antes de guardar)
   const [catNueva, setCatNueva] = useState("");
+  // Trazabilidad del cambio de stock (bitácora de caja, migración 0008)
+  const [motivo, setMotivo] = useState<string>("");
+  const [detalleStock, setDetalleStock] = useState("");
+  const [referenciaStock, setReferenciaStock] = useState("");
+  // ¿La reposición de mercadería estuvo vinculada con un egreso de caja?
+  const [conEgreso, setConEgreso] = useState(false);
+  const [sinCaja, setSinCaja] = useState(false);
 
   const set = (parcial: Partial<FormProducto>) => setForm((f) => ({ ...f, ...parcial }));
+
+  const stockCambio = editando ? redondearStock(parseNumeroPositivo(form.stock) - Number(producto?.stock ?? 0)) : 0;
+  const stockAumenta = stockCambio > 0;
+  const motivoElegido = MOTIVOS_STOCK.find((m) => m.id === motivo);
+  const afectaCaja = motivoElegido?.ingreso ? !sinCaja : conEgreso;
 
   // Escape cierra el modal (salvo cuando hay un sub-modal abierto)
   useEffect(() => {
@@ -70,11 +83,19 @@ export function ProductoFormModal({ producto, categorias, codigoInicial, ocultar
 
   const sugerido = (form.cat && EMOJI_POR_CATEGORIA[categorias.find((c) => c.id === form.cat)?.nombre ?? ""]) || EMOJI_FALLBACK;
   const emojiMostrado = form.emoji || sugerido;
-  const margen = Number(form.venta) > 0 ? ((Number(form.venta) - Number(form.costo)) / Number(form.venta)) * 100 : 0;
+  const margen = parseNumeroPositivo(form.venta) > 0
+    ? ((parseNumeroPositivo(form.venta) - parseNumeroPositivo(form.costo)) / parseNumeroPositivo(form.venta)) * 100
+    : 0;
 
   const guardar = async () => {
+    // Se impide un segundo envío mientras el primero está en curso (doble clic
+    // duplicaría el producto // reenviaría el ajuste de stock).
+    if (guardando) return;
     if (!form.nombre.trim()) return toast.error("El nombre es obligatorio");
-    if (!form.venta || Number(form.venta) < 0) return toast.error("Ingresá un precio de venta válido");
+    if (!form.venta || parseNumeroPositivo(form.venta) < 0) return toast.error("Ingresá un precio de venta válido");
+    if (editando && stockCambio !== 0 && !motivo) {
+      return toast.error("Indicá por qué cambió el stock: queda en la bitácora de caja");
+    }
 
     setGuardando(true);
 
@@ -98,16 +119,22 @@ export function ProductoFormModal({ producto, categorias, codigoInicial, ocultar
     const datos = {
       categoria_id: categoriaId,
       nombre: form.nombre,
-      precio_costo: Number(form.costo) || 0,
-      precio_venta: Number(form.venta),
-      stock: Number(form.stock) || 0,
-      stock_minimo: Number(form.minimo) || 0,
+      precio_costo: parseNumeroPositivo(form.costo),
+      precio_venta: parseNumeroPositivo(form.venta),
+      // La cantidad comprada/cargada, nunca un precio ni un total.
+      stock: redondearStock(parseNumeroPositivo(form.stock)),
+      stock_minimo: redondearStock(parseNumeroPositivo(form.minimo)),
       codigo_barras: form.codigo,
       emoji: form.emoji || null,
       acceso_rapido: form.favorito,
     };
     const r = editando
-      ? await actualizarProducto(producto!.id, datos)
+      ? await actualizarProducto(producto!.id, datos, {
+          motivo: motivo || undefined,
+          detalle: detalleStock.trim() || undefined,
+          referencia: referenciaStock.trim() || undefined,
+          afecta_caja: afectaCaja,
+        })
       : await crearProducto({ ...datos, codigo_barras: form.codigo });
     setGuardando(false);
 
@@ -119,7 +146,7 @@ export function ProductoFormModal({ producto, categorias, codigoInicial, ocultar
   };
 
   const confirmarBorrado = async () => {
-    if (!producto) return;
+    if (!producto || guardando) return;
     setGuardando(true);
     const r = await eliminarProducto(producto.id);
     setGuardando(false);
@@ -208,6 +235,44 @@ export function ProductoFormModal({ producto, categorias, codigoInicial, ocultar
                 <option value={NUEVA_CATEGORIA}>+ Nueva categoría…</option>
               </select>
             </label>
+
+            {/* Trazabilidad del stock: queda en la bitácora de caja del turno */}
+            {editando && stockCambio !== 0 && (
+              <div className="col-span-2 space-y-2 rounded-lg border border-sky-400/25 bg-sky-400/5 p-2.5 sm:col-span-6">
+                <p className="flex items-center gap-1.5 text-[11px] font-semibold text-sky-200">
+                  <Link2 className="size-3.5" />
+                  {stockAumenta ? `Ingreso de ${stockCambio} u.` : `Egreso de ${-stockCambio} u.`} de stock · queda en la bitácora
+                </p>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <label className="text-[11px] font-medium text-slate-400">
+                    Motivo
+                    <select value={motivo} onChange={(e) => setMotivo(e.target.value)} className={cn(inputCls, "mt-1")}>
+                      <option value="">Elegí el motivo…</option>
+                      {MOTIVOS_STOCK.map((m) => (
+                        <option key={m.id} value={m.id}>{m.label}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="text-[11px] font-medium text-slate-400">
+                    Nº de comprobante (opcional)
+                    <input value={referenciaStock} onChange={(e) => setReferenciaStock(e.target.value)}
+                      placeholder="Ej. factura A-0001-123" className={cn(inputCls, "mt-1")} />
+                  </label>
+                </div>
+                <input value={detalleStock} onChange={(e) => setDetalleStock(e.target.value)}
+                  placeholder="Especificación: proveedor, qué llegó, observaciones…"
+                  className={cn(inputCls, "w-full")} />
+                <label className="flex items-center gap-2 text-[11px] text-slate-300">
+                  <input type="checkbox"
+                    checked={motivoElegido?.ingreso ? !sinCaja : conEgreso}
+                    onChange={(e) => (motivoElegido?.ingreso ? setSinCaja(!e.target.checked) : setConEgreso(e.target.checked))}
+                    className="size-4 accent-emerald-500" />
+                  {stockAumenta
+                    ? "La mercadería ingresó sin movimiento de caja (no hubo pago)"
+                    : "El stock salió vinculado con un egreso de caja"}
+                </label>
+              </div>
+            )}
 
             {form.cat === NUEVA_CATEGORIA && (
               <label className="col-span-2 text-[11px] font-medium text-slate-400">

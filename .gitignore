@@ -41,3 +41,9 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# capturas / archivos sueltos del editor
+/Untitled
+
+# banco de pruebas SQL local (no forma parte de la app)
+/.tmp-test/

@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { HandCoins, Plus, Search, UserPlus } from "lucide-react";
 import { toast } from "sonner";
 import { crearCliente, registrarMovCuenta } from "@/actions/clientes";
-import { cn, formatARS } from "@/lib/utils";
+import { cn, formatARS, parseNumero } from "@/lib/utils";
 import type { ClienteConMovs, MetodoPago } from "@/types";
 
 const saldoDe = (c: ClienteConMovs) =>
@@ -37,9 +37,11 @@ export function ClientesScreen({ clientes }: { clientes: ClienteConMovs[] }) {
   const cliente = clientes.find((c) => c.id === sel) ?? clientes[0];
   const input = "rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-sm outline-none focus:border-emerald-400";
 
+  const montoNum = parseNumero(monto) ?? 0;
+
   const confirmar = () => {
-    const m = Number(monto);
-    if (!cliente || !accion || !m) return toast.error("Ingresá un monto");
+    const m = parseNumero(monto);
+    if (!cliente || !accion || m === null || m <= 0) return toast.error("Ingresá un monto");
     start(async () => {
       const r = await registrarMovCuenta(cliente.id, accion, m, detalle || (accion === "pago" ? "Pago a cuenta" : "Deuda manual"), metodo);
       if (!r.ok) return toast.error(r.error);
@@ -124,16 +126,16 @@ export function ClientesScreen({ clientes }: { clientes: ClienteConMovs[] }) {
           {accion && (
             <div className="mb-4 flex flex-wrap items-center gap-3 rounded-xl border border-white/10 bg-black/20 p-3">
               <span className="text-sm font-medium">{accion === "pago" ? "Pago:" : "Deuda:"}</span>
-              <input autoFocus placeholder="Monto" value={monto} onChange={(e) => setMonto(e.target.value.replace(/\D/g, ""))} onKeyDown={(e) => e.key === "Enter" && confirmar()} className={cn(input, "w-32")} />
+              <input autoFocus placeholder="Monto" value={monto} inputMode="decimal" onChange={(e) => setMonto(e.target.value.replace(/[^\d.,]/g, ""))} onKeyDown={(e) => e.key === "Enter" && confirmar()} className={cn(input, "w-32")} />
               {accion === "pago" && (
                 <select value={metodo} onChange={(e) => setMetodo(e.target.value as MetodoPago)} className={input}>
                   <option value="efectivo">Efectivo</option><option value="mercadopago">MercadoPago</option><option value="tarjeta">Tarjeta</option>
                 </select>
               )}
               <input placeholder="Detalle (opcional)" value={detalle} onChange={(e) => setDetalle(e.target.value)} className={cn(input, "min-w-40 flex-1")} />
-              {accion === "pago" && Number(monto) > Math.max(0, saldoDe(cliente)) && (
+              {accion === "pago" && montoNum > Math.max(0, saldoDe(cliente)) && (
                 <span className="w-full text-xs text-emerald-400">
-                  Quedará {formatARS(Number(monto) - Math.max(0, saldoDe(cliente)))} a favor del cliente.
+                  Quedará {formatARS(montoNum - Math.max(0, saldoDe(cliente)))} a favor del cliente.
                 </span>
               )}
               <button onClick={confirmar} disabled={pending} className="rounded-lg bg-emerald-500 px-4 py-2 text-sm font-semibold text-slate-950 disabled:opacity-50">Confirmar</button>

@@ -18,6 +18,20 @@ export type ProductoEditable = {
   acceso_rapido?: boolean;
 };
 
+/**
+ * Contexto del cambio de stock para la bitácora de caja (migración 0008).
+ * `motivo`: compra_proveedor, reposicion, merma_rotura, ajuste_inventario…
+ * `afecta_caja`: la operatoria también movió dinero (por defecto, sí cuando
+ * el stock sube).
+ */
+export type ContextoStock = {
+  motivo?: string;
+  detalle?: string;
+  afecta_caja?: boolean;
+  /** Nº de comprobante / factura, para no duplicar el vínculo. */
+  referencia?: string;
+};
+
 export async function listarProductos(): Promise<ProductoUI[]> {
   const supabase = await createClient();
   const { data } = await supabase
@@ -61,7 +75,11 @@ export async function crearProducto(input: {
 }
 
 /** Edición parcial de un producto. Cualquier campo omitido queda intacto. */
-export async function actualizarProducto(id: string, campos: ProductoEditable): Promise<ActionResult> {
+export async function actualizarProducto(
+  id: string,
+  campos: ProductoEditable,
+  contexto?: ContextoStock,
+): Promise<ActionResult> {
   const payload: ProductoEditable = { ...campos };
 
   if ("nombre" in payload) {
@@ -92,6 +110,15 @@ export async function actualizarProducto(id: string, campos: ProductoEditable): 
   if (!Object.keys(payload).length) return { ok: false, error: "No hay cambios para guardar" };
 
   const supabase = await createClient();
+  // El trigger de la migración 0008 registra el cambio de stock en la bitácora
+  // con este motivo (si la migración no está aplicada, el valor se ignora).
+  await supabase.rpc("set_bitacora_contexto", {
+    p_motivo: contexto?.motivo ?? null,
+    p_detalle: contexto?.detalle ?? null,
+    p_afecta_caja: contexto?.afecta_caja ?? null,
+    p_referencia: contexto?.referencia ?? null,
+  });
+
   const { error } = await supabase.from("productos").update({ ...payload, updated_at: new Date().toISOString() }).eq("id", id);
   if (error) return { ok: false, error: error.code === "23505" ? "Ya existe un producto con ese código" : error.message };
   revalidatePath("/", "layout");

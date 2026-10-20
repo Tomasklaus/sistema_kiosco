@@ -21,12 +21,12 @@ import {
 import { toast } from "sonner";
 import { registrarVenta } from "@/actions/ventas";
 import { abrirTurno } from "@/actions/caja";
-import { useCartStore } from "@/stores/cart-store";
+import { normalizarCantidad, useCartStore } from "@/stores/cart-store";
 import { useBarcodeScanner } from "@/hooks/use-barcode-scanner";
 import { CameraScanner } from "@/components/barcode/camera-scanner";
 import { ProductoFormModal } from "@/components/inventario/producto-form-modal";
 import { beepError, beepOk, buscarPorCodigo, normalizarCodigo } from "@/lib/barcode";
-import { cn, formatARS } from "@/lib/utils";
+import { cn, formatARS, parseNumeroPositivo } from "@/lib/utils";
 import type { MetodoPago, ProductoUI } from "@/types";
 
 const PAGOS: { id: MetodoPago; key: string; label: string; icon: typeof Banknote }[] = [
@@ -54,6 +54,10 @@ export function PosScreen({ productos, categorias = [], turnoAbierto, clientes, 
   const router = useRouter();
   const [pending, startT] = useTransition();
   const start = (fn: () => Promise<unknown>) => startT(async () => { await fn(); });
+  // Estado propio del cobro: la transición de React puede quedar "pendiente" por
+  // un refresh de la página y trabar el botón sin motivos.
+  const [cobrando, setCobrando] = useState(false);
+  const cobrandoRef = useRef(false);
   const { items, add, setCantidad, remove, clear, total } = useCartStore();
   const [query, setQuery] = useState("");
   const [pago, setPago] = useState<MetodoPago>("efectivo");
@@ -74,9 +78,10 @@ export function PosScreen({ productos, categorias = [], turnoAbierto, clientes, 
   const searchRef = useRef<HTMLInputElement>(null);
 
   const totalVenta = total();
-  const cantidadItems = items.reduce((a, b) => a + b.cantidad, 0);
-  const vuelto = Math.max(0, (Number(recibido) || 0) - totalVenta);
-  const falta = (Number(recibido) || 0) < totalVenta;
+  const cantidadItems = items.reduce((a, b) => a + normalizarCantidad(b.cantidad), 0);
+  const recibidoNum = parseNumeroPositivo(recibido);
+  const vuelto = pago === "efectivo" ? Math.max(0, recibidoNum - totalVenta) : 0;
+  const falta = recibidoNum < totalVenta;
   const favoritos = productos.filter((p) => p.acceso_rapido);
 
   const lista = useMemo(() => {
@@ -120,15 +125,26 @@ export function PosScreen({ productos, categorias = [], turnoAbierto, clientes, 
     if (prod) { agregar(prod); setUltimo(prod.nombre); setQuery(""); }
   };
 
-  const cobrar = useCallback(() => {
+  const cobrar = useCallback(async () => {
+    // Candado síncrono: `pending` llega tarde si se hace doble clic o se aprieta
+    // F9 dos veces, y la venta se registraría (y descontaría stock) dos veces.
+    if (cobrandoRef.current) return;
     if (!items.length) return toast.error("El ticket está vacío");
     if (pago === "efectivo" && recibido && falta) return toast.error("El monto recibido no alcanza");
     if (pago === "cuenta_corriente" && !clienteId) return toast.error("Elegí un cliente para la venta a cuenta");
-    start(async () => {
+
+    cobrandoRef.current = true;
+    setCobrando(true);
+    try {
+      // Sólo la cantidad comprada de cada producto: nunca precios ni totales.
+      const payload = items.map((i) => ({
+        producto_id: i.producto.id,
+        cantidad: normalizarCantidad(i.cantidad),
+      }));
       const res = await registrarVenta(
-        items.map((i) => ({ producto_id: i.producto.id, cantidad: i.cantidad })),
+        payload,
         pago,
-        pago === "efectivo" && recibido ? Number(recibido) : undefined,
+        pago === "efectivo" && recibido ? parseNumeroPositivo(recibido) : undefined,
         pago === "cuenta_corriente" ? clienteId : undefined
       );
       if (!res.ok) return toast.error(res.error ?? "No se pudo registrar la venta");
@@ -138,7 +154,13 @@ export function PosScreen({ productos, categorias = [], turnoAbierto, clientes, 
       setClienteId("");
       setVistaMobile("catalogo");
       router.refresh();
-    });
+    } catch (e) {
+      // Sin esto, un error de red dejaba la venta "en curso" para siempre.
+      toast.error(e instanceof Error ? e.message : "No se pudo registrar la venta");
+    } finally {
+      cobrandoRef.current = false;
+      setCobrando(false);
+    }
   }, [items, pago, recibido, falta, clienteId, totalVenta, clear, router]);
 
   useEffect(() => {
@@ -146,11 +168,17 @@ export function PosScreen({ productos, categorias = [], turnoAbierto, clientes, 
       const map: Record<string, MetodoPago> = { F2: "efectivo", F3: "mercadopago", F4: "tarjeta", F5: "cuenta_corriente" };
       if (e.key === "F1") { e.preventDefault(); searchRef.current?.focus(); }
       if (map[e.key]) { e.preventDefault(); setPago(map[e.key]); }
-      if (e.key === "F9") { e.preventDefault(); cobrar(); }
+      // Si ya se está cobrando (o el foco está en un input), F9 no hace nada.
+      if (e.key === "F9") {
+        e.preventDefault();
+        if (cobrandoRef.current || !turnoAbierto) return;
+        void cobrar();
+      }
     };
     window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);
-  }, [cobrar]);
+  }, [cobrar, turnoAbierto]);
+
 
   if (!turnoAbierto) {
     return (
@@ -161,14 +189,15 @@ export function PosScreen({ productos, categorias = [], turnoAbierto, clientes, 
           <p className="text-sm text-slate-400">Abrí el turno con el efectivo inicial para empezar a vender.</p>
           <input 
             value={fondo} 
-            onChange={(e) => setFondo(e.target.value.replace(/\D/g, ""))} 
+            onChange={(e) => setFondo(e.target.value.replace(/[^\d.,]/g, ""))} 
             placeholder="Fondo inicial (ej: 10000)"
+            inputMode="decimal"
             className="w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2.5 text-center text-lg outline-none focus:border-emerald-400" 
           />
           <button 
             disabled={pending}
             onClick={() => start(async () => {
-              const r = await abrirTurno(Number(fondo) || 0);
+              const r = await abrirTurno(parseNumeroPositivo(fondo));
               if (!r.ok) return toast.error(r.error);
               toast.success("Turno abierto"); router.refresh();
             })}
@@ -361,7 +390,7 @@ export function PosScreen({ productos, categorias = [], turnoAbierto, clientes, 
                 <div key={producto.id} className="pop flex items-center gap-2 border-t border-dashed border-slate-300 py-2">
                   <div className="flex items-center rounded-md bg-slate-200 text-xs font-bold text-slate-800">
                     <button onClick={() => setCantidad(producto.id, cantidad - 1)} className="px-1.5 py-1 hover:bg-slate-300 rounded-l" aria-label="Menos"><Minus className="size-3" /></button>
-                    <span className="min-w-4 text-center text-[11px]">{cantidad}</span>
+                    <span className="min-w-4 text-center text-[11px]">{normalizarCantidad(cantidad)}</span>
                     <button onClick={() => setCantidad(producto.id, cantidad + 1)} className="px-1.5 py-1 hover:bg-slate-300 rounded-r" aria-label="Más"><Plus className="size-3" /></button>
                   </div>
                   <div className="min-w-0 flex-1">
@@ -417,10 +446,10 @@ export function PosScreen({ productos, categorias = [], turnoAbierto, clientes, 
                   Paga con:
                   <input 
                     value={recibido} 
-                    onChange={(e) => setRecibido(e.target.value.replace(/\D/g, ""))}
+                    onChange={(e) => setRecibido(e.target.value.replace(/[^\d.,]/g, ""))}
                     disabled={pago !== "efectivo"} 
                     placeholder="$0" 
-                    inputMode="numeric"
+                    inputMode="decimal"
                     className="mt-1 w-full rounded-xl border border-white/10 bg-black/40 px-3 py-1.5 text-base font-bold text-white outline-none focus:border-emerald-400 disabled:opacity-40" 
                   />
                 </label>
@@ -434,11 +463,13 @@ export function PosScreen({ productos, categorias = [], turnoAbierto, clientes, 
             )}
 
             <button 
-              onClick={cobrar} 
-              disabled={pending}
-              className="w-full rounded-xl bg-gradient-to-r from-emerald-500 to-teal-400 py-3 font-extrabold text-slate-950 transition hover:brightness-110 active:scale-[0.98] disabled:opacity-50 text-sm shadow-lg shadow-emerald-500/20"
+              type="button"
+              onClick={() => void cobrar()} 
+              disabled={cobrando}
+              aria-busy={cobrando}
+              className="w-full rounded-xl bg-gradient-to-r from-emerald-500 to-teal-400 py-3 font-extrabold text-slate-950 transition hover:brightness-110 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50 text-sm shadow-lg shadow-emerald-500/20"
             >
-              {pending ? "Procesando venta..." : `COBRAR (${formatARS(totalVenta)})`}
+              {cobrando ? "Procesando venta..." : `COBRAR (${formatARS(totalVenta)})`}
             </button>
           </div>
         </aside>
