@@ -13,11 +13,117 @@ import {
   Banknote, 
   BookUser,
   ExternalLink,
-  Sparkles
+  Sparkles,
+  Rocket,
+  BadgePercent,
+  Check,
+  Globe,
+  Wand2,
+  Images,
+  ScanBarcode,
+  GraduationCap,
+  Headset,
+  type LucideIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 import { actualizarDatosNegocio, type NegocioConfig, type SuscripcionInfo } from "@/actions/configuracion";
+import { LlaveEnManoModal } from "@/components/configuracion/llave-en-mano-modal";
 import { formatARS } from "@/lib/utils";
+
+// ── Precios de lanzamiento (Plan Pioneros) ───────────────────────────────────
+const PRECIO_REGULAR_ARS = 30000;
+const PRECIO_PIONERO_ARS = 20000;
+const PRECIO_REGULAR_USD = "$30.00";
+const PRECIO_PIONERO_USD = "$20.00";
+
+interface PlanSuscripcion {
+  id: "mercadopago" | "paypal";
+  nombre: string;
+  regionLabel: string;
+  Icono: LucideIcon;
+  /** Borde y gradiente de la tarjeta */
+  cardCls: string;
+  /** Colores del badge de región */
+  badgeCls: string;
+  iconCls: string;
+  /** Color de marca del proveedor para el CTA */
+  ctaCls: string;
+  precioRegular: string;
+  precioPromocional: string;
+  unidad: string;
+  subtexto: string;
+  beneficios: string[];
+}
+
+const PLANES: PlanSuscripcion[] = [
+  {
+    id: "mercadopago",
+    nombre: "Mercado Pago",
+    regionLabel: "ARGENTINA (ARS)",
+    Icono: Handshake,
+    cardCls: "border-sky-500/30 bg-gradient-to-b from-sky-500/10 to-transparent",
+    badgeCls: "bg-sky-500/20 border-sky-500/30 text-sky-300",
+    iconCls: "text-sky-400",
+    ctaCls: "bg-sky-500 hover:bg-sky-400 shadow-sky-500/20",
+    precioRegular: `${formatARS(PRECIO_REGULAR_ARS)} ARS/mes`,
+    precioPromocional: formatARS(PRECIO_PIONERO_ARS),
+    unidad: "/ mes",
+    subtexto: "Débito automático mensual con Mercado Pago (dinero en cuenta o tarjetas).",
+    beneficios: [
+      "Sin límite de productos ni lectores de código de barras",
+      "Múltiples turnos y cajeros simultáneos",
+      "Control de stock, caja diaria y cuentas corrientes (fiados)",
+      "Actualización masiva de precios por categoría",
+      "Cancelación libre en cualquier momento sin penalizaciones",
+    ],
+  },
+  {
+    id: "paypal",
+    nombre: "PayPal",
+    regionLabel: "INTERNACIONAL (USD)",
+    Icono: Globe,
+    cardCls: "border-blue-600/30 bg-gradient-to-b from-blue-600/10 to-transparent",
+    badgeCls: "bg-blue-600/20 border-blue-600/30 text-blue-300",
+    iconCls: "text-blue-400",
+    ctaCls: "bg-[#0070ba] hover:bg-[#005ea6] shadow-blue-600/20",
+    precioRegular: `${PRECIO_REGULAR_USD} USD/mes`,
+    precioPromocional: PRECIO_PIONERO_USD,
+    unidad: "USD / mes",
+    subtexto: "Cobro internacional mediante tarjeta de crédito o balance PayPal.",
+    beneficios: [
+      "Facturación en dólares con respaldo PayPal",
+      "Todas las funciones y reportes avanzados ilimitados",
+      "Soporte prioritario y actualizaciones continuas sin costo",
+      "Formato de moneda adaptable a tu país",
+      "Cancelación libre con un clic desde tu cuenta",
+    ],
+  },
+];
+
+interface IncluidoLlaveEnMano {
+  Icono: LucideIcon;
+  texto: string;
+}
+
+const LLAVE_EN_MANO: {
+  precioRegular: string;
+  precioPromocional: string;
+  precioExterior: string;
+  descripcion: string;
+  incluye: IncluidoLlaveEnMano[];
+} = {
+  precioRegular: formatARS(50000),
+  precioPromocional: formatARS(40000),
+  precioExterior: "$30 USD",
+  descripcion:
+    "Ideal si no tenés tiempo ni ganas de cargar tus productos a mano. Nos encargamos de todo el trabajo pesado para que empieces a vender de inmediato.",
+  incluye: [
+    { Icono: Images, texto: "Carga inicial de tu catálogo desde fotos de facturas o listas de proveedores" },
+    { Icono: ScanBarcode, texto: "Configuración de tu lector de código de barras y accesos directos" },
+    { Icono: GraduationCap, texto: "Acompañamiento en vivo y capacitación personalizada (Presencial en San Luis / Remoto vía Anydesk para el resto del país)" },
+    { Icono: Headset, texto: "Soporte prioritario por WhatsApp directo durante tus primeros 10 días" },
+  ],
+};
 
 export function ConfiguracionScreen({ 
   negocio, 
@@ -34,6 +140,8 @@ export function ConfiguracionScreen({
   // Estados de carga para suscripciones
   const [loadingMp, setLoadingMp] = useState(false);
   const [loadingPp, setLoadingPp] = useState(false);
+  // Modal del servicio opcional "Llave en Mano"
+  const [modalLlave, setModalLlave] = useState(false);
 
   // Formulario negocio
   const [nombreNegocio, setNombreNegocio] = useState(negocio.nombre || "");
@@ -135,6 +243,36 @@ export function ConfiguracionScreen({
       {/* TAB 1: SUSCRIPCIÓN */}
       {tab === "suscripcion" && (
         <div className="space-y-6">
+          {/* Banner: Plan Pioneros (oferta de lanzamiento) */}
+          <div className="relative overflow-hidden rounded-2xl border border-amber-500/30 bg-slate-950 bg-gradient-to-r from-amber-500/15 via-cyan-500/10 to-transparent p-5 sm:p-6">
+            <Rocket className="pointer-events-none absolute -right-6 -top-6 size-32 text-amber-500/10" />
+            <div className="relative flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+              <div className="space-y-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-500/40 bg-amber-500/15 px-3 py-1 text-[10px] font-bold tracking-wide text-amber-300">
+                    <Rocket className="size-3.5" />
+                    OFERTA DE LANZAMIENTO • PLAN PIONEROS (CUPOS LIMITADOS)
+                  </span>
+                  <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/40 bg-emerald-500/15 px-2.5 py-1 text-[10px] font-bold text-emerald-300">
+                    <BadgePercent className="size-3.5" />
+                    33% OFF
+                  </span>
+                </div>
+                <p className="max-w-2xl text-sm leading-relaxed text-slate-200">
+                  Precio congelado a{" "}
+                  <strong className="font-bold text-white">{formatARS(PRECIO_PIONERO_ARS)} ARS/mes</strong>{" "}
+                  (Precio regular futuro:{" "}
+                  <span className="text-slate-400 line-through text-slate-500">{formatARS(PRECIO_REGULAR_ARS)} ARS/mes</span>
+                  ). Garantía de tarifa fija mientras mantengas tu suscripción activa.
+                </p>
+              </div>
+              <div className="flex shrink-0 items-center gap-2 rounded-xl border border-cyan-500/25 bg-cyan-500/10 px-3.5 py-2.5 text-xs text-cyan-200">
+                <ShieldCheck className="size-4 shrink-0 text-cyan-400" />
+                Tarifa bloqueada para siempre
+              </div>
+            </div>
+          </div>
+
           {/* Tarjeta de Estado Actual */}
           <div className="panel p-6 flex flex-wrap items-center justify-between gap-4">
             <div>
@@ -167,73 +305,120 @@ export function ConfiguracionScreen({
           </div>
 
           {/* Opciones de Suscripción: Mercado Pago y PayPal */}
-          <div className="grid md:grid-cols-2 gap-6">
-            {/* Mercado Pago */}
-            <div className="panel p-6 relative flex flex-col justify-between border-sky-500/30 bg-gradient-to-b from-sky-500/10 to-transparent">
-              <span className="absolute top-3 right-3 rounded-full bg-sky-500/20 border border-sky-500/30 px-3 py-0.5 text-[10px] font-bold text-sky-300">
-                ARGENTINA (ARS)
-              </span>
-              <div>
-                <h3 className="text-xl font-bold text-white flex items-center gap-2">
-                  <Handshake className="size-6 text-sky-400" />
-                  Mercado Pago
-                </h3>
-                <div className="mt-4 flex items-baseline gap-2">
-                  <span className="text-3xl font-extrabold text-white">{formatARS(15000)}</span>
-                  <span className="text-xs text-slate-400">/ mes</span>
-                </div>
-                <p className="text-xs text-slate-400 mt-1">Débito automático mensual con dinero en cuenta o tarjetas.</p>
+          <div className="grid gap-6 md:grid-cols-2">
+            {PLANES.map((plan) => {
+              const loading = plan.id === "mercadopago" ? loadingMp : loadingPp;
+              const suscribir = plan.id === "mercadopago" ? handleSuscribirMP : handleSuscribirPP;
+              const IconoProveedor = plan.id === "mercadopago" ? CreditCard : ExternalLink;
 
-                <ul className="mt-6 space-y-2.5 text-xs text-slate-300">
-                  <li className="flex items-center gap-2">✓ Sin límite de productos ni lectores de código</li>
-                  <li className="flex items-center gap-2">✓ Múltiples turnos y cajeros simultáneos</li>
-                  <li className="flex items-center gap-2">✓ Cuentas corrientes y saldo a favor de clientes</li>
-                  <li className="flex items-center gap-2">✓ Cancelación libre en cualquier momento</li>
+              return (
+                <div key={plan.id} className={`panel p-6 relative flex flex-col justify-between ${plan.cardCls}`}>
+                  <span className={`absolute top-3 right-3 rounded-full border px-3 py-0.5 text-[10px] font-bold ${plan.badgeCls}`}>
+                    {plan.regionLabel}
+                  </span>
+                  <div>
+                    <h3 className="flex items-center gap-2 text-xl font-bold text-white">
+                      <plan.Icono className={`size-6 ${plan.iconCls}`} />
+                      {plan.nombre}
+                    </h3>
+
+                    {/* Anclaje de precio + precio promocional del Plan Pioneros */}
+                    <div className="mt-4 space-y-1">
+                      <span className="block text-xs font-medium line-through text-slate-500">
+                        {plan.precioRegular}
+                      </span>
+                      <div className="flex flex-wrap items-baseline gap-x-2">
+                        <span className="text-3xl font-extrabold text-white sm:text-4xl">{plan.precioPromocional}</span>
+                        <span className="text-xs text-slate-400">{plan.unidad}</span>
+                      </div>
+                    </div>
+
+                    <p className="mt-2 text-xs text-slate-400">{plan.subtexto}</p>
+
+                    <ul className="mt-6 space-y-2.5 text-xs text-slate-300">
+                      {plan.beneficios.map((beneficio) => (
+                        <li key={beneficio} className="flex items-start gap-2">
+                          <Check className={`mt-0.5 size-3.5 shrink-0 ${plan.iconCls}`} />
+                          <span>{beneficio}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+
+                  <button
+                    onClick={suscribir}
+                    disabled={loading}
+                    className={`mt-8 flex w-full items-center justify-center gap-2 rounded-xl py-3 text-sm font-bold shadow-lg transition active:scale-[0.98] disabled:opacity-50 ${plan.ctaCls}`}
+                  >
+                    <IconoProveedor className="size-4" />
+                    {loading
+                      ? "Conectando..."
+                      : plan.id === "mercadopago"
+                        ? "Suscribirme con Mercado Pago"
+                        : "Suscribirme con PayPal"}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Servicio opcional "Llave en Mano" (pago único) */}
+          <div className="panel relative overflow-hidden border-cyan-500/30 bg-gradient-to-r from-cyan-500/10 via-cyan-500/5 to-transparent p-6">
+            <Wand2 className="pointer-events-none absolute -bottom-8 -left-8 size-40 text-cyan-500/5" />
+            <div className="relative flex flex-col gap-6 lg:flex-row lg:items-stretch">
+              <div className="flex-1 space-y-4">
+                <div className="space-y-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="inline-flex items-center gap-1 rounded-full border border-cyan-500/40 bg-cyan-500/15 px-2.5 py-1 text-[10px] font-bold tracking-wide text-cyan-300">
+                      PAGO ÚNICO
+                    </span>
+                    <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/40 bg-emerald-500/15 px-2.5 py-1 text-[10px] font-bold tracking-wide text-emerald-300">
+                      ASISTENCIA TOTAL
+                    </span>
+                  </div>
+                  <h3 className="flex items-center gap-2 text-xl font-bold text-white">
+                    <Wand2 className="size-6 text-cyan-400" />
+                    Servicio &quot;Llave en Mano&quot; <span className="text-sm font-medium text-slate-400">(Opcional)</span>
+                  </h3>
+                </div>
+
+                <p className="max-w-2xl text-xs leading-relaxed text-slate-400">{LLAVE_EN_MANO.descripcion}</p>
+
+                <ul className="grid gap-2.5 text-xs text-slate-300 sm:grid-cols-2">
+                  {LLAVE_EN_MANO.incluye.map(({ Icono, texto }) => (
+                    <li key={texto} className="flex items-start gap-2">
+                      <Icono className="mt-0.5 size-3.5 shrink-0 text-cyan-400" />
+                      <span>{texto}</span>
+                    </li>
+                  ))}
                 </ul>
               </div>
 
-              <button
-                onClick={handleSuscribirMP}
-                disabled={loadingMp}
-                className="mt-8 flex w-full items-center justify-center gap-2 rounded-xl bg-sky-500 py-3 text-sm font-bold text-white shadow-lg transition hover:bg-sky-400 active:scale-[0.98] disabled:opacity-50"
-              >
-                <CreditCard className="size-4" />
-                {loadingMp ? "Conectando..." : "Suscribirme con Mercado Pago"}
-              </button>
-            </div>
-
-            {/* PayPal */}
-            <div className="panel p-6 relative flex flex-col justify-between border-blue-600/30 bg-gradient-to-b from-blue-600/10 to-transparent">
-              <span className="absolute top-3 right-3 rounded-full bg-blue-600/20 border border-blue-600/30 px-3 py-0.5 text-[10px] font-bold text-blue-300">
-                INTERNACIONAL (USD)
-              </span>
-              <div>
-                <h3 className="text-xl font-bold text-white flex items-center gap-2">
-                  <CreditCard className="size-6 text-blue-400" />
-                  PayPal
-                </h3>
-                <div className="mt-4 flex items-baseline gap-2">
-                  <span className="text-3xl font-extrabold text-white">$15.00</span>
-                  <span className="text-xs text-slate-400">USD / mes</span>
+              <div className="flex shrink-0 flex-col justify-between gap-4 rounded-xl border border-white/10 bg-slate-950/60 p-5 lg:w-72">
+                <div>
+                  <span className="block text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                    Pago único
+                  </span>
+                  <span className="mt-1 block text-xs font-medium line-through text-slate-500">
+                    {LLAVE_EN_MANO.precioRegular} ARS
+                  </span>
+                  <div className="mt-1 flex flex-wrap items-baseline gap-x-2">
+                    <span className="text-3xl font-extrabold text-white">{LLAVE_EN_MANO.precioPromocional}</span>
+                    <span className="text-xs text-slate-400">ARS</span>
+                  </div>
+                  <p className="mt-1 text-[11px] text-slate-500">
+                    Exterior: <span className="font-semibold text-slate-300">{LLAVE_EN_MANO.precioExterior}</span>
+                  </p>
                 </div>
-                <p className="text-xs text-slate-400 mt-1">Cobro internacional mediante tarjeta de crédito o balance PayPal.</p>
 
-                <ul className="mt-6 space-y-2.5 text-xs text-slate-300">
-                  <li className="flex items-center gap-2">✓ Facturación en dólares con respaldo PayPal</li>
-                  <li className="flex items-center gap-2">✓ Todas las funciones y reportes avanzados</li>
-                  <li className="flex items-center gap-2">✓ Soporte prioritario y actualizaciones continuas</li>
-                  <li className="flex items-center gap-2">✓ Cancelación con un clic desde tu cuenta</li>
-                </ul>
+                <button
+                  onClick={() => setModalLlave(true)}
+                  className="flex w-full items-center justify-center gap-2 rounded-xl bg-cyan-400 py-3 text-sm font-bold text-slate-950 shadow-lg shadow-cyan-500/20 transition hover:bg-cyan-300 active:scale-[0.98]"
+                >
+                  <Wand2 className="size-4" />
+                  Solicitar Servicio Llave en Mano
+                </button>
               </div>
-
-              <button
-                onClick={handleSuscribirPP}
-                disabled={loadingPp}
-                className="mt-8 flex w-full items-center justify-center gap-2 rounded-xl bg-[#0070ba] py-3 text-sm font-bold text-white shadow-lg transition hover:bg-[#005ea6] active:scale-[0.98] disabled:opacity-50"
-              >
-                <ExternalLink className="size-4" />
-                {loadingPp ? "Conectando..." : "Suscribirme con PayPal"}
-              </button>
             </div>
           </div>
         </div>
@@ -323,7 +508,7 @@ export function ConfiguracionScreen({
                   <BookUser className="size-5" />
                 </div>
                 <div>
-                  <h4 className="text-sm font-semibold text-white">Cuenta Corriente ("Fiado" / Saldo a favor)</h4>
+                  <h4 className="text-sm font-semibold text-white">Cuenta Corriente (&quot;Fiado&quot; / Saldo a favor)</h4>
                   <p className="text-xs text-slate-400">Asignar deuda o débito a clientes registrados (F5)</p>
                 </div>
               </div>
@@ -384,6 +569,10 @@ export function ConfiguracionScreen({
           </div>
         </div>
       )}
+
+      {/* Modal de contratación del servicio "Llave en Mano" */}
+      <LlaveEnManoModal open={modalLlave} onClose={() => setModalLlave(false)} />
     </div>
   );
 }
+

@@ -25,6 +25,9 @@ export interface SuscripcionInfo {
   fecha_fin?: string | null;
 }
 
+/** Precio promocional vigente del "Plan Pioneros" (ARS). */
+const PRECIO_PLAN_PIONERO = 20000;
+
 export interface MetodosPagoNegocio {
   efectivo: boolean;
   mercadopago: boolean;
@@ -59,14 +62,14 @@ export async function obtenerConfiguracion() {
     proveedor: sub.proveedor,
     proveedor_suscripcion_id: sub.proveedor_suscripcion_id,
     plan: sub.plan,
-    precio: Number(sub.precio) || 15000,
+    precio: Number(sub.precio) || PRECIO_PLAN_PIONERO,
     moneda: sub.moneda || "ARS",
     fecha_inicio: sub.fecha_inicio,
     fecha_fin: sub.fecha_fin,
   } : {
     estado: "inactiva",
     plan: "Plan Pro Mensual",
-    precio: 15000,
+    precio: PRECIO_PLAN_PIONERO,
     moneda: "ARS",
   };
 
