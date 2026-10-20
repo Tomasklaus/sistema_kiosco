@@ -2,36 +2,52 @@
 
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowDownCircle, ArrowUpCircle, Lock, MinusCircle, PlusCircle } from "lucide-react";
+import { ArrowDownCircle, ArrowUpCircle, ClipboardList, Lock, MinusCircle, PlusCircle } from "lucide-react";
 import { toast } from "sonner";
-import { abrirTurno, cerrarTurno, registrarEgreso } from "@/actions/caja";
-import { cn, formatARS } from "@/lib/utils";
-import type { CajaData, MovimientoCajaRow } from "@/types";
+import { abrirTurno, cerrarTurno, registrarEgreso, registrarEgresoConStock } from "@/actions/caja";
+import { BitacoraModal } from "@/components/caja/bitacora-modal";
+import { MOTIVOS_STOCK } from "@/lib/bitacora";
+import { puedeVerBitacora } from "@/lib/permisos";
+import { cn, formatARS, parseNumero, parseNumeroPositivo } from "@/lib/utils";
+import type { BitacoraData, CajaData, MovimientoCajaRow, RolUsuario } from "@/types";
 
 const BILLETES = [20000, 10000, 2000, 1000, 500, 200, 100];
 const esIngreso = (m: MovimientoCajaRow) => m.tipo.startsWith("ingreso");
 
-export function CajaScreen({ caja }: { caja: CajaData | null }) {
+export function CajaScreen({
+  caja, rol = "cajero", bitacoraInicial = null,
+}: {
+  caja: CajaData | null;
+  rol?: RolUsuario;
+  bitacoraInicial?: BitacoraData | null;
+}) {
   const router = useRouter();
   const [pending, startT] = useTransition();
   const start = (fn: () => Promise<unknown>) => startT(async () => { await fn(); });
   const [panel, setPanel] = useState<"none" | "arqueo" | "gasto">("none");
+  const [bitacora, setBitacora] = useState(false);
   const [conteo, setConteo] = useState<Record<number, string>>({});
-  const [gasto, setGasto] = useState({ concepto: "", monto: "" });
+  const [gasto, setGasto] = useState({
+    concepto: "", monto: "", detalle: "", conStock: false, motivo: "compra_proveedor", referencia: "",
+  });
   const [fondo, setFondo] = useState("");
 
-  const movs = caja?.movimientos ?? [];
+  const verBitacora = puedeVerBitacora(rol);
+
+  const movs = useMemo(() => caja?.movimientos ?? [], [caja]);
   const fondoInicial = caja?.turno.monto_inicial ?? 0;
 
   const k = useMemo(() => {
-    const sum = (f: (m: MovimientoCajaRow) => boolean) => movs.filter(f).reduce((a, m) => a + Number(m.monto), 0);
+    // Las notas de stock (migración 0008) no mueven dinero: no entran en la caja.
+    const caja = movs.filter((m) => m.tipo !== "nota_stock");
+    const sum = (f: (m: MovimientoCajaRow) => boolean) => caja.filter(f).reduce((a, m) => a + Number(m.monto), 0);
     const efectivo = sum((m) => esIngreso(m) && m.metodo_pago === "efectivo");
     const digital = sum((m) => esIngreso(m) && m.metodo_pago !== "efectivo");
     const egresos = sum((m) => !esIngreso(m));
     return { efectivo, digital, egresos, esperado: fondoInicial + efectivo - egresos };
   }, [movs, fondoInicial]);
 
-  const contado = BILLETES.reduce((a, b) => a + b * (Number(conteo[b]) || 0), 0);
+  const contado = BILLETES.reduce((a, b) => a + b * (parseNumeroPositivo(conteo[b] ?? "")), 0);
   const diff = contado - k.esperado;
   const input = "rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-sm outline-none focus:border-emerald-400";
 
@@ -41,10 +57,10 @@ export function CajaScreen({ caja }: { caja: CajaData | null }) {
         <div className="panel w-full max-w-sm space-y-4 p-6 text-center">
           <Lock className="mx-auto size-10 text-emerald-400" />
           <h2 className="text-xl font-bold">Caja cerrada</h2>
-          <input value={fondo} onChange={(e) => setFondo(e.target.value.replace(/\D/g, ""))} placeholder="Fondo inicial (ej: 10000)" className={cn(input, "w-full text-center")} />
+          <input value={fondo} onChange={(e) => setFondo(e.target.value.replace(/[^\d.,]/g, ""))} inputMode="decimal" placeholder="Fondo inicial (ej: 10000)" className={cn(input, "w-full text-center")} />
           <button disabled={pending}
             onClick={() => start(async () => {
-              const r = await abrirTurno(Number(fondo) || 0);
+              const r = await abrirTurno(parseNumeroPositivo(fondo));
               if (!r.ok) return toast.error(r.error);
               toast.success("Turno abierto"); router.refresh();
             })}
@@ -57,13 +73,31 @@ export function CajaScreen({ caja }: { caja: CajaData | null }) {
   }
 
   const registrarGasto = () => {
-    const monto = Number(gasto.monto);
-    if (!gasto.concepto || !monto) return toast.error("Completá concepto y monto");
+    const monto = parseNumero(gasto.monto);
+    if (!gasto.concepto || monto === null || monto <= 0) return toast.error("Completá concepto y monto");
+    if (gasto.conStock && !gasto.detalle) {
+      return toast.error("Indicá qué mercadería ingresó (producto y cantidad) o desmarcá el ingreso de stock");
+    }
     start(async () => {
-      const r = await registrarEgreso(monto, gasto.concepto);
+      // Con ingreso de stock, el detalle queda además como línea de bitácora.
+      const r = gasto.conStock
+        ? await registrarEgresoConStock({
+            monto,
+            concepto: gasto.concepto,
+            detalle: gasto.detalle,
+            motivo: gasto.motivo,
+            referencia: gasto.referencia || null,
+          })
+        : await registrarEgreso(monto, gasto.concepto, { detalle: gasto.detalle, referencia: gasto.referencia || null });
       if (!r.ok) return toast.error(r.error);
-      toast.success("Gasto registrado");
-      setGasto({ concepto: "", monto: "" }); setPanel("none"); router.refresh();
+      toast.success(
+        gasto.conStock
+          ? "Gasto registrado y vinculado al ingreso de stock. Cargá los productos desde Inventario."
+          : "Gasto registrado",
+      );
+      setGasto({ concepto: "", monto: "", detalle: "", conStock: false, motivo: "compra_proveedor", referencia: "" });
+      setPanel("none");
+      router.refresh();
     });
   };
 
@@ -99,6 +133,12 @@ export function CajaScreen({ caja }: { caja: CajaData | null }) {
           <p className="text-[11px] text-slate-500">Fondo + ventas en efectivo − egresos</p>
         </div>
         <div className="flex flex-wrap sm:flex-nowrap items-center gap-2 sm:gap-3 w-full sm:w-auto">
+          {verBitacora && (
+            <button onClick={() => setBitacora(true)}
+              className="flex-1 sm:flex-initial flex items-center justify-center gap-2 rounded-xl border border-sky-400/30 bg-sky-400/10 px-4 py-2.5 text-xs sm:text-sm font-medium text-sky-200 hover:bg-sky-400/20 transition">
+              <ClipboardList className="size-4" /> Bitácora
+            </button>
+          )}
           <button onClick={() => setPanel(panel === "gasto" ? "none" : "gasto")}
             className="flex-1 sm:flex-initial flex items-center justify-center gap-2 rounded-xl border border-white/15 bg-white/5 px-4 py-2.5 text-xs sm:text-sm font-medium hover:bg-white/10 transition">
             <MinusCircle className="size-4" /> Registrar Gasto
@@ -111,10 +151,45 @@ export function CajaScreen({ caja }: { caja: CajaData | null }) {
       </div>
 
       {panel === "gasto" && (
-        <div className="panel flex items-center gap-3 border-red-400/30 px-5 py-3">
-          <input placeholder="Concepto (ej: Pago proveedor)" value={gasto.concepto} onChange={(e) => setGasto({ ...gasto, concepto: e.target.value })} className={cn(input, "flex-1")} />
-          <input placeholder="Monto" value={gasto.monto} onChange={(e) => setGasto({ ...gasto, monto: e.target.value.replace(/\D/g, "") })} className={cn(input, "w-36")} />
-          <button onClick={registrarGasto} disabled={pending} className="rounded-lg bg-red-500 px-5 py-2 text-sm font-semibold text-white disabled:opacity-50">Registrar egreso</button>
+        <div className="panel space-y-3 border-red-400/30 p-4">
+          <div className="flex flex-wrap items-center gap-3">
+            <input placeholder="Concepto (ej: Pago proveedor Coca-Cola)" value={gasto.concepto}
+              onChange={(e) => setGasto({ ...gasto, concepto: e.target.value })} className={cn(input, "min-w-0 flex-1")} />
+            <input placeholder="Monto" value={gasto.monto} inputMode="decimal"
+              onChange={(e) => setGasto({ ...gasto, monto: e.target.value.replace(/[^\d.,]/g, "") })} className={cn(input, "w-36")} />
+            <input placeholder="Nº comprobante (opcional)" value={gasto.referencia}
+              onChange={(e) => setGasto({ ...gasto, referencia: e.target.value })} className={cn(input, "w-56")} />
+          </div>
+
+          <input placeholder="Especificación: proveedor, qué se pagó, observaciones…" value={gasto.detalle}
+            onChange={(e) => setGasto({ ...gasto, detalle: e.target.value })} className={cn(input, "w-full")} />
+
+          <div className="flex flex-wrap items-center gap-3">
+            <label className="flex items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs text-slate-200">
+              <input type="checkbox" checked={gasto.conStock}
+                onChange={(e) => setGasto({ ...gasto, conStock: e.target.checked })}
+                className="size-4 accent-emerald-500" />
+              Este egreso estuvo vinculado a un ingreso de stock
+            </label>
+            {gasto.conStock && (
+              <select value={gasto.motivo} onChange={(e) => setGasto({ ...gasto, motivo: e.target.value })}
+                className={cn(input, "text-xs")}>
+                {MOTIVOS_STOCK.filter((m) => m.ingreso).map((m) => (
+                  <option key={m.id} value={m.id}>{m.label}</option>
+                ))}
+              </select>
+            )}
+            <button onClick={registrarGasto} disabled={pending}
+              className="ml-auto rounded-lg bg-red-500 px-5 py-2 text-sm font-semibold text-white disabled:opacity-50">
+              Registrar egreso
+            </button>
+          </div>
+          {gasto.conStock && (
+            <p className="text-[11px] text-slate-500">
+              Queda marcado como egreso con ingreso de stock: cargá las cantidades desde Inventario para que el detalle
+              aparezca completo en la Bitácora.
+            </p>
+          )}
         </div>
       )}
 
@@ -125,8 +200,8 @@ export function CajaScreen({ caja }: { caja: CajaData | null }) {
             {BILLETES.map((b) => (
               <label key={b} className="text-center text-[11px] text-slate-400">
                 {formatARS(b)}
-                <input value={conteo[b] ?? ""} onChange={(e) => setConteo({ ...conteo, [b]: e.target.value.replace(/\D/g, "") })}
-                  placeholder="0" className={cn(input, "mt-1 w-full text-center")} />
+                <input value={conteo[b] ?? ""} onChange={(e) => setConteo({ ...conteo, [b]: e.target.value.replace(/[^\d.,]/g, "") })}
+                  placeholder="0" inputMode="decimal" className={cn(input, "mt-1 w-full text-center")} />
               </label>
             ))}
           </div>
@@ -146,9 +221,11 @@ export function CajaScreen({ caja }: { caja: CajaData | null }) {
               <span className="absolute -left-[34px] grid size-5 place-items-center rounded-full bg-[#0b1020]">
                 {esIngreso(m) ? <PlusCircle className="size-5 text-emerald-400" /> : <MinusCircle className="size-5 text-red-400" />}
               </span>
-              <div className="flex items-center gap-4">
-                <span suppressHydrationWarning className="font-mono text-xs text-slate-500">
-                  {new Date(m.created_at).toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" })}
+              <div className="flex items-center gap-3 sm:gap-4">
+                <span suppressHydrationWarning className="w-[74px] shrink-0 font-mono text-[10px] leading-tight text-slate-500">
+                  {new Date(m.created_at).toLocaleDateString("es-AR", { timeZone: "America/Argentina/Buenos_Aires", day: "2-digit", month: "2-digit" })}
+                  {" "}
+                  {new Date(m.created_at).toLocaleTimeString("es-AR", { timeZone: "America/Argentina/Buenos_Aires", hour: "2-digit", minute: "2-digit" })}
                 </span>
                 <span className="text-sm">{m.descripcion ?? m.tipo}</span>
                 <span className="rounded bg-white/5 px-1.5 py-0.5 text-[10px] uppercase text-slate-400">{m.metodo_pago}</span>
@@ -162,6 +239,10 @@ export function CajaScreen({ caja }: { caja: CajaData | null }) {
           {!movs.length && <li className="py-6 text-sm text-slate-500">Todavía no hay movimientos en este turno.</li>}
         </ol>
       </div>
+
+      {bitacora && verBitacora && (
+        <BitacoraModal inicial={bitacoraInicial} onClose={() => setBitacora(false)} />
+      )}
     </div>
   );
 }

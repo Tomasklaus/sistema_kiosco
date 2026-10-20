@@ -55,3 +55,11 @@ export function puedeEditarProductos(rol: RolUsuario): boolean {
 export function puedeVerCostos(rol: RolUsuario): boolean {
   return rol === "owner" || rol === "admin";
 }
+
+/**
+ * Bitácora completa de movimientos de caja (con detalle de stock y de cada
+ * operador). El cajero sólo ve su propio turno en la pantalla de Caja.
+ */
+export function puedeVerBitacora(rol: RolUsuario): boolean {
+  return rol === "owner" || rol === "admin";
+}

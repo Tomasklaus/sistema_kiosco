@@ -60,13 +60,95 @@ export type CategoriaConUso = {
   emoji: string;
 };
 
-export interface MovimientoCajaRow {
+export type MovimientoCajaRow = {
   id: string;
-  tipo: "ingreso_venta" | "ingreso_cobro_deuda" | "ingreso_manual" | "egreso_proveedor" | "egreso_manual";
+  tipo: TipoMovCaja;
   metodo_pago: MetodoPago;
   monto: number;
   descripcion: string | null;
   created_at: string;
+};
+
+/** Tipos de movimiento que maneja la bitácora (incluye las notas de stock). */
+export type TipoMovCaja =
+  | "ingreso_venta"
+  | "ingreso_cobro_deuda"
+  | "ingreso_manual"
+  | "egreso_proveedor"
+  | "egreso_manual"
+  | "egreso_anulacion"
+  | "nota_stock";
+
+/** Un elemento movido dentro de un movimiento de caja o de stock. */
+export interface ItemMovimiento {
+  producto_id: string;
+  nombre: string;
+  /** Positivo = entró, negativo = salió. */
+  cantidad: number;
+  motivo: string;
+}
+
+/** Fila completa de la bitácora (vista dueño/admin). */
+export interface MovimientoBitacora {
+  id: string;
+  turno_id: string;
+  created_at: string;
+  tipo: TipoMovCaja;
+  metodo_pago: MetodoPago;
+  monto: number;
+  descripcion: string | null;
+  detalle: string | null;
+  forma_pago: string | null;
+  referencia: string | null;
+  /** El egreso vino con mercadería (ingreso de stock). */
+  stock_involucrado: boolean;
+  items: ItemMovimiento[] | null;
+  usuario_id: string;
+  usuario: string;
+  venta_id: string | null;
+}
+
+/** Ingreso de stock registrado en un turno, para cruzar con los egresos. */
+export interface IngresoStockRow {
+  movimiento_id: string;
+  created_at: string;
+  usuario_id: string;
+  usuario: string;
+  descripcion: string | null;
+  referencia: string | null;
+  items: ItemMovimiento[];
+}
+
+/** Turno disponible para filtrar la bitácora. */
+export interface TurnoBitacora {
+  id: string;
+  abierto_at: string;
+  cerrado_at: string | null;
+  estado: "abierto" | "cerrado";
+  usuario: string;
+  monto_inicial: number;
+  diferencia: number | null;
+}
+
+export type RangoBitacora = "hoy" | "ayer" | "7d" | "mes" | "todo";
+
+export interface BitacoraData {
+  rango: RangoBitacora;
+  desde: string;
+  /** false = falta correr la migración 0008 (la bitácora igual se muestra). */
+  migrado: boolean;
+  movimientos: MovimientoBitacora[];
+  /** Ingresos de stock de los turnos incluidos, agrupados por turno. */
+  ingresos: IngresoStockRow[];
+  turnos: TurnoBitacora[];
+  operadores: { id: string; nombre: string }[];
+  totales: {
+    ingresos: number;
+    egresos: number;
+    /** Egresos que vinieron con ingreso de stock. */
+    egresosConStock: number;
+    cantidadMovimientos: number;
+  };
 }
 
 export interface CajaData {
