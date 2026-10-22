@@ -5,10 +5,13 @@ import { createClient } from "@/lib/supabase/server";
 import type { ActionResult, MetodoPago } from "@/types";
 
 /**
- * Registra una venta. `cantidad` es SIEMPRE el número de unidades compradas:
- * se valida acá (entero >= 1) y la función `registrar_venta` vuelve a validar
- * del lado de la base, que es lo único que descuenta stock
- * (`stock = stock - cantidad`).
+ * Registra una venta. `cantidad` es el número de unidades (entero >= 1) o los
+ * kilos con hasta 3 decimales si el producto es pesable (`unidad_venta = 'kg'`).
+ *
+ * Acá sólo se descarta lo obviamente inválido (NaN, 0 o negativo); la
+ * validación definitiva —enteros para productos por unidad, hasta gramos para
+ * los pesables— y el descuento de stock los hace `registrar_venta` en la base
+ * (migración 0010), que es la única fuente de verdad.
  */
 export async function registrarVenta(
   items: { producto_id: string; cantidad: number }[],
@@ -20,11 +23,13 @@ export async function registrarVenta(
     return { ok: false, error: "La venta no tiene items" };
   }
 
-  const limpios = items
-    .map((i) => ({ producto_id: i.producto_id, cantidad: Number(i.cantidad) }))
-    .filter((i) => i.producto_id && Number.isFinite(i.cantidad) && i.cantidad >= 1);
+  const limpios = items.map((i) => ({
+    producto_id: i.producto_id,
+    // 3 decimales = gramos; se corta la cola binaria (0.1 + 0.2 → 0.3).
+    cantidad: Math.round(Number(i.cantidad) * 1000) / 1000,
+  }));
 
-  if (limpios.length !== items.length) {
+  if (limpios.some((i) => !i.producto_id || !Number.isFinite(i.cantidad) || i.cantidad <= 0)) {
     return { ok: false, error: "Hay productos con una cantidad inválida" };
   }
 

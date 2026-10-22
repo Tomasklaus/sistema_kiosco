@@ -44,3 +44,23 @@ export function parseNumeroPositivo(valor: string | number | null | undefined): 
 export const formatCantidad = (n: number) =>
   Number.isFinite(n) ? new Intl.NumberFormat("es-AR", { maximumFractionDigits: 3 }).format(n) : "";
 
+/**
+ * Peso en kg con hasta 3 decimales y sufijo "kg" (es-AR): `0.35` → "0,35 kg".
+ * Se usa en el POS, el ticket y el inventario de productos pesables.
+ */
+export const formatKg = (kg: number) =>
+  Number.isFinite(kg) ? `${formatCantidad(kg)} kg` : "—";
+
+/**
+ * Cantidad lista para mostrar según el tipo de venta: `"3 u."` o `"0,35 kg"`.
+ */
+export const formatCantidadVenta = (cantidad: number, unidad: "unit" | "kg") =>
+  unidad === "kg" ? formatKg(cantidad) : `${formatCantidad(cantidad)} u.`;
+
+/**
+ * Convierte gramos a kilos con 3 decimales (250 → 0.25) evitando las colas
+ * binarias (0.1 + 0.2 ≠ 0.30000000000000004).
+ */
+export const gramosAKg = (gramos: number) =>
+  Math.round((Number.isFinite(gramos) ? gramos : 0)) / 1000;
+

@@ -1,7 +1,17 @@
 // Tipos de dominio (reflejan supabase/migrations/0001_schema_inicial.sql).
 // Más adelante se pueden reemplazar por `supabase gen types typescript`.
 export type MetodoPago = "efectivo" | "mercadopago" | "tarjeta" | "cuenta_corriente";
+/** Un egreso nunca se paga "a cuenta corriente". */
+export type MetodoPagoEgreso = Exclude<MetodoPago, "cuenta_corriente">;
 export type RolUsuario = "owner" | "admin" | "cajero";
+
+/**
+ * Cómo se vende un producto:
+ * - `unit`: por unidad (alfajor, gaseosa). El stock está en unidades.
+ * - `kg`:   por peso (fiambres, verduras). El precio es por kg y el stock en kg
+ *           con hasta 3 decimales (gramos).
+ */
+export type UnidadVenta = "unit" | "kg";
 
 export interface Categoria {
   id: string;
@@ -16,9 +26,13 @@ export interface Producto {
   codigo_barras: string | null;
   nombre: string;
   precio_costo: number;
+  /** Precio por unidad, o por kg si `unidad_venta` es `"kg"`. */
   precio_venta: number;
+  /** Stock en unidades, o en kg (3 decimales) si `unidad_venta` es `"kg"`. */
   stock: number;
   stock_minimo: number;
+  /** Tipo de venta (migración 0010). */
+  unidad_venta: UnidadVenta;
   acceso_rapido: boolean;
   activo: boolean;
   /** Emoji propio del producto. `null` = usar el de su categoría. */
@@ -46,6 +60,16 @@ export interface ActionResult<T = undefined> {
   ok: boolean;
   error?: string;
   data?: T;
+}
+
+/**
+ * Ítem del carrito. No tiene dependencias para poder tipar el store sin
+ * arrastrar el cliente de Supabase.
+ */
+export interface CartItem {
+  producto: Producto;
+  /** Unidades (entero) o kilos con hasta 3 decimales si el producto es pesable. */
+  cantidad: number;
 }
 
 export type ProductoUI = Producto & { categoria: string | null; emoji: string };

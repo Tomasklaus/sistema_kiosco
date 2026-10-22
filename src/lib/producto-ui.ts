@@ -1,4 +1,5 @@
-import type { Producto, ProductoUI } from "@/types";
+import type { Producto, ProductoUI, UnidadVenta } from "@/types";
+import { formatCantidadVenta } from "@/lib/utils";
 
 /**
  * Emoji sugerido por categoría: se usa cuando el producto no tiene uno propio.
@@ -9,7 +10,10 @@ export const EMOJI_POR_CATEGORIA: Record<string, string> = {
   Bebidas: "🥤",
   Snacks: "🍟",
   Cigarrillos: "🚬",
+  Fiambrería: "🧀",
+  Verdulería: "🥬",
 };
+
 
 /** Emoji por defecto cuando el producto no tiene emoji ni categoría conocida. */
 export const EMOJI_FALLBACK = "📦";
@@ -60,6 +64,36 @@ export function redondearStock(valor: number): number {
   return Math.round((Number.isFinite(valor) ? valor : 0) * 1000) / 1000;
 }
 
+/** Kg (o unidades) con hasta 3 decimales; nunca negativo. */
+export function redondearCantidad(valor: number): number {
+  return Math.max(0, redondearStock(valor));
+}
+
+/** Etiqueta del tipo de venta para el formulario y la tabla de inventario. */
+export const ETIQUETA_UNIDAD: Record<UnidadVenta, string> = {
+  unit: "Por unidad",
+  kg: "Por peso (Kg/Gramos)",
+};
+
+/** Etiqueta corta del tipo de venta (`u.` / `kg`). */
+export const SIGLA_UNIDAD: Record<UnidadVenta, string> = { unit: "u.", kg: "kg" };
+
+/** Normaliza el tipo de venta que llega de la UI o de la base. */
+export function normalizarUnidadVenta(valor: string | null | undefined): UnidadVenta {
+  return valor === "kg" ? "kg" : "unit";
+}
+
+/** ¿El producto se vende por peso (kg/gramos)? */
+export function esPesable(p: Pick<Producto, "unidad_venta"> | null | undefined): boolean {
+  return p?.unidad_venta === "kg";
+}
+
+/** Cantidad tal como se muestra en el ticket: `"0,35 kg"` o `"3 u."`. */
+export function etiquetaCantidad(p: Pick<Producto, "unidad_venta">, cantidad: number): string {
+  return formatCantidadVenta(cantidad, p.unidad_venta);
+}
+
+
 /** Validaciones alineadas con los `check` de la tabla productos. */
 export function validarProducto(p: { nombre: string | null; precio_costo: number; precio_venta: number }): string | null {
   if (!p.nombre) return "El nombre del producto es obligatorio";
@@ -73,5 +107,12 @@ export function toUI(row: Producto & { categorias?: { nombre: string } | null })
   const categoria = categorias?.nombre ?? null;
   const propio = normalizarEmoji(p.emoji);
   const porCategoria = categoria ? EMOJI_POR_CATEGORIA[categoria] : undefined;
-  return { ...p, categoria, emoji: propio ?? porCategoria ?? EMOJI_FALLBACK };
+  // Si la migración 0010 todavía no está aplicada, la columna no viene: el
+  // producto se trata como "por unidad", que es el comportamiento de siempre.
+  return {
+    ...p,
+    unidad_venta: normalizarUnidadVenta(p.unidad_venta),
+    categoria,
+    emoji: propio ?? porCategoria ?? EMOJI_FALLBACK,
+  };
 }

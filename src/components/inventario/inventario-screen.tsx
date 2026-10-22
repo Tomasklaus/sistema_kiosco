@@ -2,7 +2,7 @@
 
 import { useCallback, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Camera, Database, Pencil, Plus, Printer, Search, Star, Tag, TrendingUp, X } from "lucide-react";
+import { Camera, Database, Pencil, Plus, Printer, Scale, Search, Star, Tag, TrendingUp, X } from "lucide-react";
 import { toast } from "sonner";
 import { actualizarProducto, aplicarAumentoCategoria, cargarDatosDemo } from "@/actions/productos";
 import { crearCategoria } from "@/actions/categorias";
@@ -12,7 +12,7 @@ import { CategoriasModal } from "@/components/inventario/categorias-modal";
 import { EmojiPicker } from "@/components/inventario/emoji-picker";
 import { ProductoFormModal } from "@/components/inventario/producto-form-modal";
 import { beepError, beepOk, buscarPorCodigo, imprimirEtiquetas, normalizarCodigo } from "@/lib/barcode";
-import { EMOJI_FALLBACK, EMOJI_POR_CATEGORIA, normalizarNombreCategoria } from "@/lib/producto-ui";
+import { EMOJI_FALLBACK, EMOJI_POR_CATEGORIA, esPesable, normalizarNombreCategoria } from "@/lib/producto-ui";
 import { cn, formatARS, formatCantidad, parseNumero } from "@/lib/utils";
 import type { CategoriaConUso, ProductoUI } from "@/types";
 
@@ -195,6 +195,20 @@ function StockBadge({ stock, min }: { stock: number; min: number }) {
   return <span className={cn("rounded-full px-2 py-0.5 text-[11px] font-medium ring-1", cls)}>{txt}</span>;
 }
 
+/** Tipo de venta del producto: "Unidad" o "Kg" (productos pesables). */
+function TipoBadge({ unidad }: { unidad: ProductoUI["unidad_venta"] }) {
+  return unidad === "kg" ? (
+    <span title="Se vende por peso: el precio es por kg"
+      className="inline-flex items-center gap-1 rounded-full bg-sky-500/15 px-2 py-0.5 text-[11px] font-medium text-sky-300 ring-1 ring-sky-500/30">
+      <Scale className="size-3" /> Kg
+    </span>
+  ) : (
+    <span className="rounded-full bg-white/5 px-2 py-0.5 text-[11px] font-medium text-slate-400 ring-1 ring-white/10">
+      Unidad
+    </span>
+  );
+}
+
 export function InventarioScreen({ productos, categorias, codigoInicial, ocultarCostos = false }: {
   productos: ProductoUI[];
   categorias: CategoriaConUso[];
@@ -206,6 +220,7 @@ export function InventarioScreen({ productos, categorias, codigoInicial, ocultar
   const start = (fn: () => Promise<unknown>) => startT(async () => { await fn(); });
   const [q, setQ] = useState("");
   const [soloBajo, setSoloBajo] = useState(false);
+  const [soloPesables, setSoloPesables] = useState(false);
   const [cat, setCat] = useState("todas");
   const [aumento, setAumento] = useState(false);
   const [aumCat, setAumCat] = useState("");
@@ -231,9 +246,10 @@ export function InventarioScreen({ productos, categorias, codigoInicial, ocultar
   const lista = useMemo(() => productos.filter((p) => {
     if (q && !`${p.nombre} ${p.codigo_barras ?? ""}`.toLowerCase().includes(q.toLowerCase())) return false;
     if (soloBajo && p.stock > p.stock_minimo) return false;
+    if (soloPesables && !esPesable(p)) return false;
     if (cat !== "todas" && p.categoria_id !== cat && (p.categoria ?? "").toLowerCase() !== cat.toLowerCase()) return false;
     return true;
-  }), [productos, q, soloBajo, cat]);
+  }), [productos, q, soloBajo, soloPesables, cat]);
 
   const run = useCallback((fn: () => Promise<{ ok: boolean; error?: string }>, okMsg: string, after?: () => void) =>
     start(async () => {
@@ -364,6 +380,11 @@ export function InventarioScreen({ productos, categorias, codigoInicial, ocultar
           <input type="checkbox" checked={soloBajo} onChange={(e) => setSoloBajo(e.target.checked)} className="accent-emerald-500" />
           Ver solo bajo stock
         </label>
+        <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-300"
+          title="Productos que se venden por kilo/gramos (fiambres, verduras)">
+          <input type="checkbox" checked={soloPesables} onChange={(e) => setSoloPesables(e.target.checked)} className="accent-emerald-500" />
+          <Scale className="size-3.5 text-emerald-400" /> Sólo pesables
+        </label>
         <select value={cat} onChange={(e) => setCat(e.target.value)} className={input}>
           <option value="todas">Todas las categorías</option>
           {categorias.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
@@ -407,6 +428,7 @@ export function InventarioScreen({ productos, categorias, codigoInicial, ocultar
               <th className="px-4 py-3">Código</th>
               <th>Producto</th>
               <th>Categoría</th>
+              <th className="text-center">Tipo</th>
               {!ocultarCostos && <th className="text-right">Costo</th>}
               <th className="text-right">Venta</th>
               {!ocultarCostos && <th className="text-right">Margen</th>}
@@ -443,15 +465,23 @@ export function InventarioScreen({ productos, categorias, codigoInicial, ocultar
                     <CategoryCell value={p.categoria_id} categorias={categorias} onSave={(v) => cambiarCategoria(p.id, v)}
                       onCrear={crearCategoriaRapida} />
                   </td>
+                  <td className="text-center">
+                    <TipoBadge unidad={p.unidad_venta} />
+                  </td>
                   {!ocultarCostos && (
                     <td className="pr-2 text-right text-slate-400"><EditableCell money value={p.precio_costo} onSave={(v) => editar(p.id, "precio_costo", v)} /></td>
                   )}
-                  <td className="text-right"><EditableCell money value={p.precio_venta} onSave={(v) => editar(p.id, "precio_venta", v)} /></td>
+                  <td className="text-right">
+                    <EditableCell money value={p.precio_venta} onSave={(v) => editar(p.id, "precio_venta", v)} />
+                    {esPesable(p) && <span className="text-[10px] font-semibold text-emerald-300/80">/kg</span>}
+                  </td>
                   {!ocultarCostos && (
                     <td className={cn("pr-2 text-right font-medium", margen < 20 ? "text-amber-300" : "text-emerald-400")}>{margen.toFixed(0)}%</td>
                   )}
-                  <td className="pl-6"><EditableCell value={p.stock} onSave={(v) => editar(p.id, "stock", v)} /></td>
-                  <td className="pl-4"><EditableCell value={p.stock_minimo} onSave={(v) => editar(p.id, "stock_minimo", v)} /></td>
+                  <td className="pl-6"><EditableCell value={p.stock} onSave={(v) => editar(p.id, "stock", v)} />
+                    {esPesable(p) && <span className="ml-0.5 text-[10px] text-slate-500">kg</span>}</td>
+                  <td className="pl-4"><EditableCell value={p.stock_minimo} onSave={(v) => editar(p.id, "stock_minimo", v)} />
+                    {esPesable(p) && <span className="ml-0.5 text-[10px] text-slate-500">kg</span>}</td>
                   <td className="pr-4"><StockBadge stock={p.stock} min={p.stock_minimo} /></td>
                   <td className="pr-2 text-center">
                     <button onClick={() => abrirEdicion(p)} title="Editar todos los datos del producto"
@@ -463,7 +493,7 @@ export function InventarioScreen({ productos, categorias, codigoInicial, ocultar
               );
             })}
             {!lista.length && (
-              <tr><td colSpan={11} className="py-12 text-center text-slate-500">
+              <tr><td colSpan={12} className="py-12 text-center text-slate-500">
                 {productos.length ? "Sin resultados" : (
                   <div className="space-y-3">
                     <p>Todavía no tenés productos.</p>

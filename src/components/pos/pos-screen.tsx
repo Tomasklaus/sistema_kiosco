@@ -13,6 +13,7 @@ import {
   Plus, 
   Pencil,
   Radio, 
+  Scale,
   Search, 
   Trash2,
   Receipt,
@@ -21,12 +22,15 @@ import {
 import { toast } from "sonner";
 import { registrarVenta } from "@/actions/ventas";
 import { abrirTurno } from "@/actions/caja";
-import { normalizarCantidad, useCartStore } from "@/stores/cart-store";
+import { cantidadItem, useCartItems, useCartStore } from "@/stores/cart-store";
 import { useBarcodeScanner } from "@/hooks/use-barcode-scanner";
 import { CameraScanner } from "@/components/barcode/camera-scanner";
 import { ProductoFormModal } from "@/components/inventario/producto-form-modal";
+import { PesoModal } from "@/components/pos/peso-modal";
 import { beepError, beepOk, buscarPorCodigo, normalizarCodigo } from "@/lib/barcode";
-import { cn, formatARS, parseNumeroPositivo } from "@/lib/utils";
+import { esPesable } from "@/lib/producto-ui";
+import { textoDetalleLinea, textoStock } from "@/lib/pesables";
+import { cn, formatARS, formatCantidad, parseNumeroPositivo } from "@/lib/utils";
 import type { MetodoPago, ProductoUI } from "@/types";
 
 const PAGOS: { id: MetodoPago; key: string; label: string; icon: typeof Banknote }[] = [
@@ -58,7 +62,8 @@ export function PosScreen({ productos, categorias = [], turnoAbierto, clientes, 
   // un refresh de la página y trabar el botón sin motivos.
   const [cobrando, setCobrando] = useState(false);
   const cobrandoRef = useRef(false);
-  const { items, add, setCantidad, remove, clear, total } = useCartStore();
+  const { add, setCantidad, remove, clear, total } = useCartStore();
+  const items = useCartItems();
   const [query, setQuery] = useState("");
   const [pago, setPago] = useState<MetodoPago>("efectivo");
   const [recibido, setRecibido] = useState("");
@@ -74,11 +79,14 @@ export function PosScreen({ productos, categorias = [], turnoAbierto, clientes, 
 
   // Edición rápida del producto desde el POS (dueño/admin)
   const [editandoId, setEditandoId] = useState<string | null>(null);
+
+  // Producto pesable que se está pesando (modal de kg/gramos)
+  const [pesando, setPesando] = useState<{ producto: ProductoUI; kg: number | null } | null>(null);
   
   const searchRef = useRef<HTMLInputElement>(null);
 
   const totalVenta = total();
-  const cantidadItems = items.reduce((a, b) => a + normalizarCantidad(b.cantidad), 0);
+  const cantidadItems = items.reduce((a, b) => a + cantidadItem(b), 0);
   const recibidoNum = parseNumeroPositivo(recibido);
   const vuelto = pago === "efectivo" ? Math.max(0, recibidoNum - totalVenta) : 0;
   const falta = recibidoNum < totalVenta;
@@ -90,10 +98,28 @@ export function PosScreen({ productos, categorias = [], turnoAbierto, clientes, 
   }, [query, productos]);
 
   const agregar = useCallback((prod: ProductoUI, cant = 1) => {
+    if (esPesable(prod)) {
+      // Los pesables no se agregan "de a uno": se abre el modal de peso.
+      setPesando({ producto: prod, kg: null });
+      return false;
+    }
     add(prod, cant);
     setFlash(true);
     setTimeout(() => setFlash(false), 150);
+    return true;
   }, [add]);
+
+  /** Confirma el peso: agrega la línea nueva o reemplaza los kg de la existente. */
+  const confirmarPeso = (kg: number) => {
+    if (!pesando) return;
+    const existente = items.find((i) => i.producto.id === pesando.producto.id);
+    if (existente) setCantidad(pesando.producto.id, kg);
+    else add(pesando.producto, kg);
+    setFlash(true);
+    setTimeout(() => setFlash(false), 150);
+    setUltimo(pesando.producto.nombre);
+    setVistaMobile("ticket");
+  };
 
   const onScan = useCallback((raw: string) => {
     const code = normalizarCodigo(raw);
@@ -110,6 +136,7 @@ export function PosScreen({ productos, categorias = [], turnoAbierto, clientes, 
       return;
     }
     beepOk();
+    // Los pesables abren el modal de kg/gramos (el escaneo sólo identifica el producto).
     agregar(prod);
     setUltimo(prod.nombre);
     if (prod.stock <= 0) toast.warning(`${prod.nombre} figura sin stock`);
@@ -139,7 +166,7 @@ export function PosScreen({ productos, categorias = [], turnoAbierto, clientes, 
       // Sólo la cantidad comprada de cada producto: nunca precios ni totales.
       const payload = items.map((i) => ({
         producto_id: i.producto.id,
-        cantidad: normalizarCantidad(i.cantidad),
+        cantidad: cantidadItem(i),
       }));
       const res = await registrarVenta(
         payload,
@@ -305,6 +332,11 @@ export function PosScreen({ productos, categorias = [], turnoAbierto, clientes, 
                     )}
                     <span className="text-base sm:text-lg leading-none">{p.emoji}</span>
                     <span className="truncate">{p.nombre}</span>
+                    {esPesable(p) && (
+                      <span className="absolute bottom-1 right-1.5 text-[9px] font-bold uppercase tracking-wide text-emerald-200/80">
+                        {formatARS(p.precio_venta)}/kg
+                      </span>
+                    )}
                   </button>
                 ))}
               </div>
@@ -337,7 +369,7 @@ export function PosScreen({ productos, categorias = [], turnoAbierto, clientes, 
                       "ml-auto rounded-md bg-black/60 px-1.5 py-0.5 text-[9px] font-mono",
                       prod.stock <= prod.stock_minimo ? "text-red-400" : "text-slate-400"
                     )}>
-                      Stock: {prod.stock}
+                      Stock: {textoStock(prod.stock, prod.unidad_venta)}
                     </span>
                   </span>
                   
@@ -347,7 +379,12 @@ export function PosScreen({ productos, categorias = [], turnoAbierto, clientes, 
                   
                   <div className="mt-1">
                     <p className="text-xs sm:text-sm font-medium truncate">{prod.nombre}</p>
-                    <p className="font-bold text-emerald-400 text-xs sm:text-sm">{formatARS(prod.precio_venta)}</p>
+                    <p className="font-bold text-emerald-400 text-xs sm:text-sm">
+                      {formatARS(prod.precio_venta)}
+                      {esPesable(prod) && (
+                        <span className="ml-0.5 text-[10px] font-semibold text-emerald-300/80">/kg</span>
+                      )}
+                    </p>
                   </div>
                 </button>
               ))}
@@ -386,21 +423,35 @@ export function PosScreen({ productos, categorias = [], turnoAbierto, clientes, 
                   <p className="text-[11px] text-slate-500">Elegí productos del catálogo o pasalos por el lector.</p>
                 </div>
               )}
-              {items.map(({ producto, cantidad }) => (
-                <div key={producto.id} className="pop flex items-center gap-2 border-t border-dashed border-slate-300 py-2">
-                  <div className="flex items-center rounded-md bg-slate-200 text-xs font-bold text-slate-800">
-                    <button onClick={() => setCantidad(producto.id, cantidad - 1)} className="px-1.5 py-1 hover:bg-slate-300 rounded-l" aria-label="Menos"><Minus className="size-3" /></button>
-                    <span className="min-w-4 text-center text-[11px]">{normalizarCantidad(cantidad)}</span>
-                    <button onClick={() => setCantidad(producto.id, cantidad + 1)} className="px-1.5 py-1 hover:bg-slate-300 rounded-r" aria-label="Más"><Plus className="size-3" /></button>
+              {items.map((item) => {
+                const { producto, cantidad } = item;
+                const kg = esPesable(producto);
+                const subtotal = Math.round(producto.precio_venta * cantidad * 100) / 100;
+                return (
+                  <div key={producto.id} className="pop flex items-center gap-2 border-t border-dashed border-slate-300 py-2">
+                    {kg ? (
+                      // Pesable: se ajusta el peso (no "un clic más"): botón de balanza.
+                      <button onClick={() => setPesando({ producto, kg: cantidad })}
+                        title="Cambiar el peso" aria-label={`Cambiar el peso de ${producto.nombre}`}
+                        className="flex shrink-0 items-center gap-1 rounded-md bg-slate-200 px-1.5 py-1 text-[11px] font-bold text-slate-800 hover:bg-slate-300">
+                        <Scale className="size-3" /> {formatCantidad(cantidad)} kg
+                      </button>
+                    ) : (
+                      <div className="flex items-center rounded-md bg-slate-200 text-xs font-bold text-slate-800">
+                        <button onClick={() => setCantidad(producto.id, cantidad - 1)} className="px-1.5 py-1 hover:bg-slate-300 rounded-l" aria-label="Menos"><Minus className="size-3" /></button>
+                        <span className="min-w-4 text-center text-[11px]">{cantidad}</span>
+                        <button onClick={() => setCantidad(producto.id, cantidad + 1)} className="px-1.5 py-1 hover:bg-slate-300 rounded-r" aria-label="Más"><Plus className="size-3" /></button>
+                      </div>
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-xs font-semibold leading-tight">{producto.nombre}</p>
+                      <p className="text-[10px] text-slate-500 font-mono">{textoDetalleLinea(producto, cantidad)}</p>
+                    </div>
+                    <span className="text-xs font-bold whitespace-nowrap">{formatARS(subtotal)}</span>
+                    <button onClick={() => remove(producto.id)} className="text-slate-400 hover:text-red-500 p-1" aria-label="Quitar"><Trash2 className="size-3.5" /></button>
                   </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-xs font-semibold leading-tight">{producto.nombre}</p>
-                    <p className="text-[10px] text-slate-500 font-mono">{formatARS(producto.precio_venta)}</p>
-                  </div>
-                  <span className="text-xs font-bold whitespace-nowrap">{formatARS(producto.precio_venta * cantidad)}</span>
-                  <button onClick={() => remove(producto.id)} className="text-slate-400 hover:text-red-500 p-1" aria-label="Quitar"><Trash2 className="size-3.5" /></button>
-                </div>
-              ))}
+                );
+              })}
             </div>
 
             {/* Total general */}
@@ -476,6 +527,15 @@ export function PosScreen({ productos, categorias = [], turnoAbierto, clientes, 
       </div>
 
       {camara && <CameraScanner continuo onDetect={onScan} onClose={() => setCamara(false)} />}
+
+      {pesando && (
+        <PesoModal
+          producto={pesando.producto}
+          cantidadInicial={pesando.kg}
+          onConfirm={confirmarPeso}
+          onClose={() => setPesando(null)}
+        />
+      )}
 
       {puedeEditar && editandoId && (() => {
         const producto = productos.find((p) => p.id === editandoId) ?? null;
