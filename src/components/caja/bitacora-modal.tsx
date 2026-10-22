@@ -2,13 +2,13 @@
 
 import { useEffect, useMemo, useState, useTransition } from "react";
 import {
-  ArrowDownCircle, ArrowUpCircle, Boxes, ChevronDown, ClipboardList, Loader2, PackageCheck,
-  RefreshCw, Search, Store, UserRound, X,
+  ArrowDownCircle, ArrowUpCircle, Banknote, Boxes, ChevronDown, ClipboardList, Loader2, PackageCheck,
+  RefreshCw, Search, Smartphone, Store, UserRound, X,
 } from "lucide-react";
 import { anularVenta, obtenerBitacora } from "@/actions/caja";
 import {
-  ETIQUETA_MOV, diaAR, esIngresoCaja, etiquetaDia, etiquetaMotivo, fechaHoraAR, soloHoraAR,
-  unidadesEntrada, unidadesSalida,
+  ETIQUETA_MOV, clasesMetodoEgreso, diaAR, esIngresoCaja, esMetodoEfectivo, etiquetaDia, etiquetaMetodoEgreso,
+  etiquetaMotivo, fechaHoraAR, soloHoraAR, unidadesEntrada, unidadesSalida,
 } from "@/lib/bitacora";
 import { cn, formatARS, formatCantidad } from "@/lib/utils";
 import type {
@@ -132,14 +132,19 @@ export function BitacoraModal({ inicial, onClose }: { inicial: BitacoraData | nu
 
   const totalesFiltrados = useMemo(() => filtrados.reduce(
     (acc, m) => {
-      if (esIngreso(m)) acc.ingresos += Number(m.monto);
+      if (esIngreso(m)) {
+        acc.ingresos += Number(m.monto);
+        // Lo cobrado fuera de la caja (MP / tarjeta) no está entre los billetes.
+        if (!esMetodoEfectivo(m.metodo_pago)) acc.ingresosDigitales += Number(m.monto);
+      }
       if (esEgreso(m)) {
         acc.egresos += Number(m.monto);
         if (m.stock_involucrado) acc.conStock += Number(m.monto);
+        if (!esMetodoEfectivo(m.metodo_pago)) acc.egresosDigitales += Number(m.monto);
       }
       return acc;
     },
-    { ingresos: 0, egresos: 0, conStock: 0 },
+    { ingresos: 0, egresos: 0, conStock: 0, ingresosDigitales: 0, egresosDigitales: 0 },
   ), [filtrados]);
 
   const turnosDelDia = useMemo(() => {
@@ -260,8 +265,11 @@ export function BitacoraModal({ inicial, onClose }: { inicial: BitacoraData | nu
             <p className="text-sm font-bold text-emerald-300">{formatARS(totalesFiltrados.ingresos)}</p>
           </div>
           <div className={chip}>
-            <p className={chipTitulo}>Egresos</p>
-            <p className="text-sm font-bold text-red-300">{formatARS(totalesFiltrados.egresos)}</p>
+            <p className={chipTitulo}>Egresos en efectivo</p>
+            <p className="text-sm font-bold text-red-300">{formatARS(totalesFiltrados.egresos - totalesFiltrados.egresosDigitales)}</p>
+            <p className="text-[10px] text-sky-300/80" title="Transferencia / Mercado Pago: no descuenta la caja física">
+              {formatARS(totalesFiltrados.egresosDigitales)} por transf. / MP
+            </p>
           </div>
           <div className={chip}>
             <p className={chipTitulo}>Egresos con stock</p>
@@ -390,8 +398,21 @@ function FilaMovimiento({
                 sin stock asociado
               </span>
             )}
-            {m.forma_pago && m.forma_pago !== "efectivo" && (
-              <span className="rounded bg-white/5 px-1.5 py-0.5 text-[10px] text-slate-400">{m.forma_pago}</span>
+            {m.tipo !== "nota_stock" && (
+              <span
+                className={cn(
+                  "inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] font-semibold",
+                  clasesMetodoEgreso(m.metodo_pago),
+                )}
+                title={esMetodoEfectivo(m.metodo_pago)
+                  ? "Se pagó/cobró en efectivo: mueve el saldo físico de la caja"
+                  : "Transferencia / Mercado Pago: gasto del negocio que no descuenta el efectivo de la caja"}
+              >
+                {esMetodoEfectivo(m.metodo_pago)
+                  ? <Banknote className="size-3" />
+                  : <Smartphone className="size-3" />}
+                {etiquetaMetodoEgreso(m.metodo_pago)}
+              </span>
             )}
           </span>
           <span className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-slate-500">

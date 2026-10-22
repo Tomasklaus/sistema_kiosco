@@ -64,6 +64,60 @@ export const FORMAS_PAGO_EGRESO = [
   { id: "cuenta_corriente", label: "Cuenta corriente (queda a deber)" },
 ] as const;
 
+/**
+ * Método con el que se pagó un egreso (migración 0011):
+ * - `efectivo`    → la plata sale de la caja física (resta del arqueo).
+ * - `mercadopago` → transferencia bancaria / Mercado Pago: gasto del negocio
+ *                   que NO descuenta el efectivo de la caja.
+ * `tarjeta` sólo existe en ventas; en egresos se trata como no efectivo.
+ */
+export type MetodoEgreso = "efectivo" | "mercadopago" | "tarjeta";
+
+export const METODOS_EGRESO = [
+  {
+    id: "efectivo",
+    label: "Efectivo",
+    detalle: "Sale de la caja física · resta del efectivo esperado",
+  },
+  {
+    id: "mercadopago",
+    label: "Transferencia / Mercado Pago",
+    detalle: "Gasto del negocio · no descuenta el efectivo de la caja",
+  },
+] as const satisfies readonly { id: MetodoEgreso; label: string; detalle: string }[];
+
+/** ¿Este medio de pago sale de la caja física? */
+export const esMetodoEfectivo = (metodo: string | null | undefined) =>
+  normalizarMetodoEgreso(metodo) === "efectivo";
+
+/** Normaliza lo que venga de la base o del formulario a un método de egreso. */
+export function normalizarMetodoEgreso(metodo: string | null | undefined): MetodoEgreso {
+  const m = (metodo ?? "").trim().toLowerCase();
+  if (m === "mercadopago" || m === "transferencia" || m === "mp" || m === "digital") return "mercadopago";
+  if (m === "tarjeta") return "tarjeta";
+  return "efectivo";
+}
+
+/** Texto corto del badge: "Efectivo" o "Transferencia / MP". */
+export function etiquetaMetodoEgreso(metodo: string | null | undefined): string {
+  return normalizarMetodoEgreso(metodo) === "mercadopago" ? "Transferencia / MP" : "Efectivo";
+}
+
+/** Clases del badge según el medio: neutro/azul para efectivo, celeste para transferencia. */
+export function clasesMetodoEgreso(metodo: string | null | undefined): string {
+  return normalizarMetodoEgreso(metodo) === "mercadopago"
+    ? "border-sky-400/30 bg-sky-400/10 text-sky-300"
+    : "border-white/10 bg-white/5 text-slate-300";
+}
+
+/** Aporte de un movimiento de caja al efectivo del turno (igual que `mov_aporte_efectivo` en la base). */
+export function aporteEfectivo(tipo: TipoMovCaja, metodoPago: string | null | undefined, monto: number): number {
+  if (!esMetodoEfectivo(metodoPago)) return 0;
+  // Las notas de stock llevan un monto simbólico ($0,01) y no mueven dinero.
+  if (tipo === "nota_stock") return 0;
+  return esIngresoCaja(tipo) ? Number(monto) || 0 : -(Number(monto) || 0);
+}
+
 /** Total de unidades que entraron (positivas) en una lista de ítems. */
 export const unidadesEntrada = (items: ItemMovimiento[] | null | undefined) =>
   (items ?? []).reduce((a, i) => a + (Number(i.cantidad) > 0 ? Number(i.cantidad) : 0), 0);

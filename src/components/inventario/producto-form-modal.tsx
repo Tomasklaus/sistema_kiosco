@@ -8,16 +8,20 @@ import { crearCategoria } from "@/actions/categorias";
 import { CameraScanner } from "@/components/barcode/camera-scanner";
 import { EmojiPicker } from "@/components/inventario/emoji-picker";
 import { generarCodigoInterno, normalizarCodigo } from "@/lib/barcode";
-import { MOTIVOS_STOCK } from "@/lib/bitacora";
-import { EMOJI_FALLBACK, EMOJI_POR_CATEGORIA, normalizarNombreCategoria, redondearStock } from "@/lib/producto-ui";
-import { cn, formatARS, parseNumeroPositivo } from "@/lib/utils";
-import type { ProductoUI } from "@/types";
+import { METODOS_EGRESO, MOTIVOS_STOCK, type MetodoEgreso } from "@/lib/bitacora";
+import {
+  EMOJI_FALLBACK, EMOJI_POR_CATEGORIA, normalizarNombreCategoria, normalizarUnidadVenta, redondearStock,
+} from "@/lib/producto-ui";
+import { cn, formatARS, formatCantidad, parseNumeroPositivo } from "@/lib/utils";
+import type { ProductoUI, UnidadVenta } from "@/types";
 
 type Cat = { id: string; nombre: string };
 
 export type FormProducto = {
   codigo: string; nombre: string; costo: string; venta: string;
   stock: string; minimo: string; cat: string; emoji: string; favorito: boolean;
+  /** `"unit"` = por unidad, `"kg"` = por peso (migración 0010). */
+  unidad: UnidadVenta;
 };
 
 /** Formulario en blanco; si se pasa un producto, precarga sus datos para editarlo. */
@@ -32,6 +36,7 @@ export function formDesdeProducto(p: ProductoUI | null, codigoInicial = ""): For
     cat: p?.categoria_id ?? "",
     emoji: p?.emoji ?? "",
     favorito: p?.acceso_rapido ?? false,
+    unidad: normalizarUnidadVenta(p?.unidad_venta),
   };
 }
 
@@ -64,6 +69,8 @@ export function ProductoFormModal({ producto, categorias, codigoInicial, ocultar
   // ¿La reposición de mercadería estuvo vinculada con un egreso de caja?
   const [conEgreso, setConEgreso] = useState(false);
   const [sinCaja, setSinCaja] = useState(false);
+  // De dónde salió la plata del egreso (migración 0011).
+  const [metodoPago, setMetodoPago] = useState<MetodoEgreso>("efectivo");
 
   const set = (parcial: Partial<FormProducto>) => setForm((f) => ({ ...f, ...parcial }));
 
@@ -71,6 +78,12 @@ export function ProductoFormModal({ producto, categorias, codigoInicial, ocultar
   const stockAumenta = stockCambio > 0;
   const motivoElegido = MOTIVOS_STOCK.find((m) => m.id === motivo);
   const afectaCaja = motivoElegido?.ingreso ? !sinCaja : conEgreso;
+  // Producto pesable: el precio es por kg y el stock está en kg (3 decimales).
+  const pesable = form.unidad === "kg";
+  const sufijoStock = pesable ? "kg" : "u.";
+  // Pasar de pesable a por unidad con stock decimal dejaría fracciones de
+  // unidad imposibles de vender: se avisa antes de guardar.
+  const stockDecimal = redondearStock(parseNumeroPositivo(form.stock)) % 1 !== 0;
 
   // Escape cierra el modal (salvo cuando hay un sub-modal abierto)
   useEffect(() => {
@@ -95,6 +108,9 @@ export function ProductoFormModal({ producto, categorias, codigoInicial, ocultar
     if (!form.venta || parseNumeroPositivo(form.venta) < 0) return toast.error("Ingresá un precio de venta válido");
     if (editando && stockCambio !== 0 && !motivo) {
       return toast.error("Indicá por qué cambió el stock: queda en la bitácora de caja");
+    }
+    if (!pesable && stockDecimal) {
+      return toast.error("Un producto por unidad no puede tener stock con decimales: ajustá el stock");
     }
 
     setGuardando(true);
@@ -127,6 +143,7 @@ export function ProductoFormModal({ producto, categorias, codigoInicial, ocultar
       codigo_barras: form.codigo,
       emoji: form.emoji || null,
       acceso_rapido: form.favorito,
+      unidad_venta: form.unidad,
     };
     const r = editando
       ? await actualizarProducto(producto!.id, datos, {
@@ -134,6 +151,8 @@ export function ProductoFormModal({ producto, categorias, codigoInicial, ocultar
           detalle: detalleStock.trim() || undefined,
           referencia: referenciaStock.trim() || undefined,
           afecta_caja: afectaCaja,
+          // Los pagos por transferencia / MP no descuentan el efectivo de la caja.
+          metodo_pago: metodoPago,
         })
       : await crearProducto({ ...datos, codigo_barras: form.codigo });
     setGuardando(false);
@@ -206,23 +225,52 @@ export function ProductoFormModal({ producto, categorias, codigoInicial, ocultar
               </label>
             )}
             <label className={cn("col-span-1 text-[11px] font-medium text-slate-400", ocultarCostos && "col-span-2 sm:col-span-3")}>
-              Venta ($)
+              {pesable ? "Precio por Kg ($)" : "Venta ($)"}
               <input placeholder="0" value={form.venta} inputMode="decimal"
                 onChange={(e) => set({ venta: e.target.value.replace(/[^\d.]/g, "") })}
                 className={cn(inputCls, "mt-1")} />
             </label>
             <label className="col-span-1 text-[11px] font-medium text-slate-400">
-              Stock
+              {pesable ? "Stock actual (Kg)" : "Stock"}
               <input placeholder="0" value={form.stock} inputMode="decimal"
                 onChange={(e) => set({ stock: e.target.value.replace(/[^\d.]/g, "") })}
                 className={cn(inputCls, "mt-1")} />
             </label>
             <label className="col-span-1 text-[11px] font-medium text-slate-400">
-              Mínimo
+              {pesable ? "Mínimo (Kg)" : "Mínimo"}
               <input placeholder="5" value={form.minimo} inputMode="decimal"
                 onChange={(e) => set({ minimo: e.target.value.replace(/[^\d.]/g, "") })}
                 className={cn(inputCls, "mt-1")} />
             </label>
+
+            {/* Tipo de venta: por unidad (kiosco) o por peso (fiambres, verduras) */}
+            <div className="col-span-2">
+              <p className="mb-1 text-[11px] font-medium text-slate-400">Tipo de venta</p>
+              <div className="flex gap-2">
+                {([
+                  { id: "unit" as const, label: "Por unidad", hint: "Alfajor, gaseosa…" },
+                  { id: "kg" as const, label: "Por peso", hint: "Queso, tomate… (se cobra por kg)" },
+                ]).map((op) => (
+                  <button key={op.id} type="button" onClick={() => set({ unidad: op.id })}
+                    aria-pressed={form.unidad === op.id}
+                    className={cn(
+                      "flex-1 rounded-lg border px-3 py-2 text-left text-xs transition",
+                      form.unidad === op.id
+                        ? "border-emerald-400 bg-emerald-400/10 text-emerald-200"
+                        : "border-white/10 bg-black/20 text-slate-300 hover:bg-white/5"
+                    )}>
+                    <span className="block font-semibold">{op.label}</span>
+                    <span className="block text-[10px] text-slate-400">{op.hint}</span>
+                  </button>
+                ))}
+              </div>
+              {!pesable && stockDecimal && (
+                <p className="mt-1.5 rounded-md border border-amber-400/30 bg-amber-400/10 px-2 py-1 text-[11px] text-amber-200">
+                  El stock tiene decimales. Un producto por unidad necesita un stock entero:
+                  si querés venderlo por peso, elegí “Por peso”.
+                </p>
+              )}
+            </div>
 
             <label className="col-span-2 text-[11px] font-medium text-slate-400">
               Categoría
@@ -241,7 +289,9 @@ export function ProductoFormModal({ producto, categorias, codigoInicial, ocultar
               <div className="col-span-2 space-y-2 rounded-lg border border-sky-400/25 bg-sky-400/5 p-2.5 sm:col-span-6">
                 <p className="flex items-center gap-1.5 text-[11px] font-semibold text-sky-200">
                   <Link2 className="size-3.5" />
-                  {stockAumenta ? `Ingreso de ${stockCambio} u.` : `Egreso de ${-stockCambio} u.`} de stock · queda en la bitácora
+                  {stockAumenta
+                    ? `Ingreso de ${formatCantidad(Math.abs(stockCambio))} ${sufijoStock}`
+                    : `Egreso de ${formatCantidad(Math.abs(stockCambio))} ${sufijoStock}`} de stock · queda en la bitácora
                 </p>
                 <div className="grid gap-2 sm:grid-cols-2">
                   <label className="text-[11px] font-medium text-slate-400">
@@ -271,6 +321,36 @@ export function ProductoFormModal({ producto, categorias, codigoInicial, ocultar
                     ? "La mercadería ingresó sin movimiento de caja (no hubo pago)"
                     : "El stock salió vinculado con un egreso de caja"}
                 </label>
+
+                {/* ¿Con qué se pagó la mercadería? (migración 0011) */}
+                {afectaCaja && (
+                  <div className="space-y-1.5 rounded-lg border border-white/10 bg-black/20 p-2.5">
+                    <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                      Método de pago de la compra
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {METODOS_EGRESO.map((m) => {
+                        const activo = metodoPago === m.id;
+                        return (
+                          <button key={m.id} type="button" aria-pressed={activo}
+                            onClick={() => setMetodoPago(m.id)} title={m.detalle}
+                            className={cn(
+                              "rounded-lg border px-2.5 py-1.5 text-left text-[11px] font-semibold transition",
+                              activo
+                                ? m.id === "efectivo"
+                                  ? "border-emerald-400/50 bg-emerald-400/10 text-emerald-200"
+                                  : "border-sky-400/50 bg-sky-400/10 text-sky-200"
+                                : "border-white/10 bg-white/5 text-slate-400 hover:bg-white/10",
+                            )}>
+                            {m.label}
+                            <span className="mt-0.5 block text-[10px] font-normal opacity-80">{m.detalle}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
               </div>
             )}
 
@@ -293,7 +373,7 @@ export function ProductoFormModal({ producto, categorias, codigoInicial, ocultar
               <div className="col-span-2 self-end text-right text-[11px] text-slate-400">
                 Margen
                 <p className={cn("text-sm font-semibold", margen < 20 ? "text-amber-300" : "text-emerald-400")}>
-                  {margen.toFixed(0)}% · {formatARS(Number(form.venta) || 0)}
+                  {margen.toFixed(0)}% · {formatARS(Number(form.venta) || 0)}{pesable ? "/kg" : ""}
                 </p>
               </div>
             )}

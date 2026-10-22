@@ -6,13 +6,21 @@ import { ArrowDownCircle, ArrowUpCircle, ClipboardList, Lock, MinusCircle, PlusC
 import { toast } from "sonner";
 import { abrirTurno, cerrarTurno, registrarEgreso, registrarEgresoConStock } from "@/actions/caja";
 import { BitacoraModal } from "@/components/caja/bitacora-modal";
-import { MOTIVOS_STOCK } from "@/lib/bitacora";
+import { METODOS_EGRESO, MOTIVOS_STOCK, aporteEfectivo, clasesMetodoEgreso, etiquetaMetodoEgreso, normalizarMetodoEgreso, type MetodoEgreso } from "@/lib/bitacora";
 import { puedeVerBitacora } from "@/lib/permisos";
 import { cn, formatARS, parseNumero, parseNumeroPositivo } from "@/lib/utils";
-import type { BitacoraData, CajaData, MovimientoCajaRow, RolUsuario } from "@/types";
+import type {
+  BitacoraData, CajaData, MovimientoCajaRow, RolUsuario,
+} from "@/types";
 
 const BILLETES = [20000, 10000, 2000, 1000, 500, 200, 100];
 const esIngreso = (m: MovimientoCajaRow) => m.tipo.startsWith("ingreso");
+/** Estado en blanco del panel "Registrar Gasto" (pago en efectivo por defecto). */
+const GASTO_VACIO = {
+  concepto: "", monto: "", detalle: "", conStock: false, motivo: "compra_proveedor", referencia: "",
+  metodo: "efectivo" as MetodoEgreso,
+};
+
 
 export function CajaScreen({
   caja, rol = "cajero", bitacoraInicial = null,
@@ -27,9 +35,7 @@ export function CajaScreen({
   const [panel, setPanel] = useState<"none" | "arqueo" | "gasto">("none");
   const [bitacora, setBitacora] = useState(false);
   const [conteo, setConteo] = useState<Record<number, string>>({});
-  const [gasto, setGasto] = useState({
-    concepto: "", monto: "", detalle: "", conStock: false, motivo: "compra_proveedor", referencia: "",
-  });
+  const [gasto, setGasto] = useState(GASTO_VACIO);
   const [fondo, setFondo] = useState("");
 
   const verBitacora = puedeVerBitacora(rol);
@@ -38,14 +44,19 @@ export function CajaScreen({
   const fondoInicial = caja?.turno.monto_inicial ?? 0;
 
   const k = useMemo(() => {
-    // Las notas de stock (migración 0008) no mueven dinero: no entran en la caja.
-    const caja = movs.filter((m) => m.tipo !== "nota_stock");
-    const sum = (f: (m: MovimientoCajaRow) => boolean) => caja.filter(f).reduce((a, m) => a + Number(m.monto), 0);
-    const efectivo = sum((m) => esIngreso(m) && m.metodo_pago === "efectivo");
-    const digital = sum((m) => esIngreso(m) && m.metodo_pago !== "efectivo");
-    const egresos = sum((m) => !esIngreso(m));
-    return { efectivo, digital, egresos, esperado: fondoInicial + efectivo - egresos };
+    // Sólo el efectivo mueve los billetes de la caja: los cobros por Mercado
+    // Pago / tarjeta y los egresos por transferencia son movimientos del
+    // negocio que no entran al arqueo (migración 0011).
+    const sum = (f: (m: MovimientoCajaRow) => boolean) => movs.filter(f).reduce((a, m) => a + Number(m.monto), 0);
+    const efectivo = sum((m) => esIngreso(m) && normalizarMetodoEgreso(m.metodo_pago) === "efectivo");
+    const digital = sum((m) => esIngreso(m) && m.tipo !== "nota_stock" && normalizarMetodoEgreso(m.metodo_pago) !== "efectivo");
+    const egresos = sum((m) => !esIngreso(m) && m.tipo !== "nota_stock");
+    const egresosDigital = sum((m) => !esIngreso(m) && m.tipo !== "nota_stock" && normalizarMetodoEgreso(m.metodo_pago) !== "efectivo");
+    // Misma cuenta que cerrar_turno: fondo + ingresos en efectivo − egresos en efectivo.
+    const esperado = fondoInicial + movs.reduce((a, m) => a + aporteEfectivo(m.tipo, m.metodo_pago, Number(m.monto)), 0);
+    return { efectivo, digital, egresos, egresosDigital, esperado };
   }, [movs, fondoInicial]);
+
 
   const contado = BILLETES.reduce((a, b) => a + b * (parseNumeroPositivo(conteo[b] ?? "")), 0);
   const diff = contado - k.esperado;
@@ -87,15 +98,21 @@ export function CajaScreen({
             detalle: gasto.detalle,
             motivo: gasto.motivo,
             referencia: gasto.referencia || null,
+            metodo_pago: gasto.metodo,
           })
-        : await registrarEgreso(monto, gasto.concepto, { detalle: gasto.detalle, referencia: gasto.referencia || null });
+        : await registrarEgreso(monto, gasto.concepto, {
+            detalle: gasto.detalle,
+            referencia: gasto.referencia || null,
+            metodo_pago: gasto.metodo,
+          });
       if (!r.ok) return toast.error(r.error);
+      const comoSePago = gasto.metodo === "efectivo" ? "en efectivo" : "por transferencia / Mercado Pago";
       toast.success(
         gasto.conStock
-          ? "Gasto registrado y vinculado al ingreso de stock. Cargá los productos desde Inventario."
-          : "Gasto registrado",
+          ? `Gasto ${comoSePago} registrado y vinculado al ingreso de stock. Cargá los productos desde Inventario.`
+          : `Gasto ${comoSePago} registrado`,
       );
-      setGasto({ concepto: "", monto: "", detalle: "", conStock: false, motivo: "compra_proveedor", referencia: "" });
+      setGasto(GASTO_VACIO);
       setPanel("none");
       router.refresh();
     });
@@ -114,6 +131,10 @@ export function CajaScreen({
     { t: "Ventas Digitales", v: k.digital, c: "from-sky-500/25 to-sky-500/5 border-sky-400/30 text-sky-300" },
     { t: "Egresos", v: k.egresos, c: "from-red-500/25 to-red-500/5 border-red-400/30 text-red-300" },
   ];
+  // Cuánto de esos egresos salió por transferencia / MP (no toca la caja física).
+  const notaEgresos = k.egresosDigital > 0
+    ? `${formatARS(k.egresosDigital)} por transferencia / MP (no sale de la caja)`
+    : "";
 
   return (
     <div className="flex h-full flex-col gap-4">
@@ -122,6 +143,9 @@ export function CajaScreen({
           <div key={x.t} className={cn("rounded-2xl border bg-gradient-to-br p-3.5 sm:p-5", x.c)}>
             <p className="text-[10px] sm:text-xs uppercase tracking-wider opacity-70 font-semibold">{x.t}</p>
             <p className="mt-1 sm:mt-2 text-xl sm:text-2xl font-bold truncate">{formatARS(x.v)}</p>
+            {x.t === "Egresos" && notaEgresos && (
+              <p className="mt-0.5 truncate text-[10px] text-sky-300/80" title={notaEgresos}>{notaEgresos}</p>
+            )}
           </div>
         ))}
       </div>
@@ -130,7 +154,10 @@ export function CajaScreen({
         <div>
           <p className="text-[10px] sm:text-xs uppercase tracking-wider text-slate-400 font-semibold">Efectivo esperado en caja</p>
           <p className="glow-total text-3xl sm:text-4xl font-extrabold">{formatARS(k.esperado)}</p>
-          <p className="text-[11px] text-slate-500">Fondo + ventas en efectivo − egresos</p>
+          <p className="text-[11px] text-slate-500">
+            Fondo + ventas en efectivo − egresos en efectivo
+            <span className="text-sky-300/80"> · los pagos por transferencia / MP no descuentan la caja</span>
+          </p>
         </div>
         <div className="flex flex-wrap sm:flex-nowrap items-center gap-2 sm:gap-3 w-full sm:w-auto">
           {verBitacora && (
@@ -164,6 +191,32 @@ export function CajaScreen({
           <input placeholder="Especificación: proveedor, qué se pagó, observaciones…" value={gasto.detalle}
             onChange={(e) => setGasto({ ...gasto, detalle: e.target.value })} className={cn(input, "w-full")} />
 
+          {/* ¿De dónde salió la plata? (migración 0011) */}
+          <div className="space-y-1.5">
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Método de pago</p>
+            <div className="flex flex-wrap gap-2">
+              {METODOS_EGRESO.map((m) => {
+                const activo = gasto.metodo === m.id;
+                return (
+                  <button key={m.id} type="button" aria-pressed={activo}
+                    onClick={() => setGasto({ ...gasto, metodo: m.id })}
+                    title={m.detalle}
+                    className={cn(
+                      "rounded-lg border px-3 py-2 text-left text-xs font-semibold transition",
+                      activo
+                        ? m.id === "efectivo"
+                          ? "border-emerald-400/50 bg-emerald-400/10 text-emerald-200"
+                          : "border-sky-400/50 bg-sky-400/10 text-sky-200"
+                        : "border-white/10 bg-white/5 text-slate-400 hover:bg-white/10",
+                    )}>
+                    {m.label}
+                    <span className="mt-0.5 block text-[10px] font-normal opacity-80">{m.detalle}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
           <div className="flex flex-wrap items-center gap-3">
             <label className="flex items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs text-slate-200">
               <input type="checkbox" checked={gasto.conStock}
@@ -190,6 +243,11 @@ export function CajaScreen({
               aparezca completo en la Bitácora.
             </p>
           )}
+          <p className="text-[11px] text-slate-500">
+            {gasto.metodo === "efectivo"
+              ? "Se descuenta del efectivo esperado en caja."
+              : "Queda en la bitácora como gasto del negocio, pero no descuenta el efectivo de la caja."}
+          </p>
         </div>
       )}
 
@@ -228,7 +286,19 @@ export function CajaScreen({
                   {new Date(m.created_at).toLocaleTimeString("es-AR", { timeZone: "America/Argentina/Buenos_Aires", hour: "2-digit", minute: "2-digit" })}
                 </span>
                 <span className="text-sm">{m.descripcion ?? m.tipo}</span>
-                <span className="rounded bg-white/5 px-1.5 py-0.5 text-[10px] uppercase text-slate-400">{m.metodo_pago}</span>
+                {m.tipo !== "nota_stock" && (
+                  <span
+                    className={cn(
+                      "rounded border px-1.5 py-0.5 text-[10px] font-semibold",
+                      clasesMetodoEgreso(m.metodo_pago),
+                    )}
+                    title={etiquetaMetodoEgreso(m.metodo_pago) === "Efectivo"
+                      ? "Pagado/cobrado en efectivo: mueve la caja física"
+                      : "Por transferencia / Mercado Pago: no descuenta el efectivo de la caja"}
+                  >
+                    {etiquetaMetodoEgreso(m.metodo_pago)}
+                  </span>
+                )}
               </div>
               <span className={cn("flex items-center gap-1 font-semibold", esIngreso(m) ? "text-emerald-400" : "text-red-400")}>
                 {esIngreso(m) ? <ArrowUpCircle className="size-4" /> : <ArrowDownCircle className="size-4" />}

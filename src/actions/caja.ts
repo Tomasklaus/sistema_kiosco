@@ -5,7 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { obtenerSesion } from "@/actions/sesion";
 import { puedeVerBitacora } from "@/lib/permisos";
 import type {
-  ActionResult, BitacoraData, CajaData, IngresoStockRow, MovimientoBitacora,
+  ActionResult, BitacoraData, CajaData, IngresoStockRow, MetodoPagoEgreso, MovimientoBitacora,
   RangoBitacora, TurnoBitacora,
 } from "@/types";
 
@@ -42,6 +42,12 @@ export type ContextoEgreso = {
   /** Referencia externa (nº de comprobante) para no duplicar. */
   referencia?: string | null;
   forma_pago?: string;
+  /**
+   * De dónde salió la plata (migración 0011):
+   * `efectivo` (default) descuenta la caja física; `mercadopago` /
+   * `transferencia` queda como gasto del negocio sin tocar el efectivo.
+   */
+  metodo_pago?: MetodoPagoEgreso;
 };
 
 export async function registrarEgreso(
@@ -55,6 +61,7 @@ export async function registrarEgreso(
     p_stock_involucrado: Boolean(contexto.stock_involucrado),
     p_referencia: contexto.referencia?.trim() || null,
     p_forma_pago: contexto.forma_pago || "efectivo",
+    p_metodo_pago: contexto.metodo_pago || "efectivo",
   });
   if (error) return { ok: false, error: error.message };
   revalidatePath("/", "layout");
@@ -81,6 +88,8 @@ export async function registrarEgresoConStock(input: {
   motivo: string;
   referencia?: string | null;
   forma_pago?: string;
+  /** `efectivo` (sale de la caja) o `mercadopago` (transferencia / MP). */
+  metodo_pago?: MetodoPagoEgreso;
 }): Promise<ActionResult<string>> {
   const supabase = await createClient();
   const { data, error } = await supabase.rpc("registrar_egreso_stock", {
@@ -90,7 +99,9 @@ export async function registrarEgresoConStock(input: {
     p_motivo: input.motivo || "compra_proveedor",
     p_referencia: input.referencia?.trim() || null,
     p_forma_pago: input.forma_pago || "efectivo",
+    p_metodo_pago: input.metodo_pago || "efectivo",
   });
+
   if (!error) {
     revalidatePath("/", "layout");
     return { ok: true, data: data as string };
@@ -104,6 +115,7 @@ export async function registrarEgresoConStock(input: {
       stock_involucrado: true,
       referencia: input.referencia ?? null,
       forma_pago: input.forma_pago,
+      metodo_pago: input.metodo_pago,
     });
   }
   return { ok: false, error: error.message };
