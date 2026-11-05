@@ -33,11 +33,11 @@ import {
   actualizarMetodosPagoNegocio,
   iniciarSuscripcionMercadoPago,
   iniciarSuscripcionPayPal,
-  METODOS_PAGO_DEFAULT,
   type MetodosPagoNegocio,
   type NegocioConfig,
   type SuscripcionInfo,
 } from "@/actions/configuracion";
+import { METODOS_PAGO_DEFAULT } from "@/lib/suscripcion";
 import { LlaveEnManoModal } from "@/components/configuracion/llave-en-mano-modal";
 import { formatARS } from "@/lib/utils";
 

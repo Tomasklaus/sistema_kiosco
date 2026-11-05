@@ -6,6 +6,20 @@ export type EstadoSuscripcion =
   | "pendiente"
   | "cancelada";
 
+export interface MetodosPagoNegocio {
+  efectivo: boolean;
+  mercadopago: boolean;
+  tarjeta: boolean;
+  cuenta_corriente: boolean;
+}
+
+export const METODOS_PAGO_DEFAULT: MetodosPagoNegocio = {
+  efectivo: true,
+  mercadopago: true,
+  tarjeta: true,
+  cuenta_corriente: true,
+};
+
 export function calcularEstadoSuscripcion(sub: {
   estado?: string | null;
   fecha_fin?: string | null;

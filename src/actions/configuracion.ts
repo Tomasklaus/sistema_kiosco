@@ -3,24 +3,15 @@
 import { revalidatePath } from "next/cache";
 import { headers } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
-import { calcularEstadoSuscripcion, type EstadoSuscripcion } from "@/lib/suscripcion";
+import {
+  calcularEstadoSuscripcion,
+  METODOS_PAGO_DEFAULT,
+  type EstadoSuscripcion,
+  type MetodosPagoNegocio,
+} from "@/lib/suscripcion";
 import type { ActionResult } from "@/types";
 
-export type { EstadoSuscripcion };
-
-export interface MetodosPagoNegocio {
-  efectivo: boolean;
-  mercadopago: boolean;
-  tarjeta: boolean;
-  cuenta_corriente: boolean;
-}
-
-export const METODOS_PAGO_DEFAULT: MetodosPagoNegocio = {
-  efectivo: true,
-  mercadopago: true,
-  tarjeta: true,
-  cuenta_corriente: true,
-};
+export type { EstadoSuscripcion, MetodosPagoNegocio };
 
 export interface NegocioConfig {
   id: string;
