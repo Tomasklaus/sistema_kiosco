@@ -32,14 +32,6 @@ export interface NegocioConfig {
   metodos_pago_activos?: MetodosPagoNegocio | null;
 }
 
-export type EstadoSuscripcion =
-  | "prueba"
-  | "activa"
-  | "pausada"
-  | "inactiva"
-  | "pendiente"
-  | "cancelada";
-
 export interface SuscripcionInfo {
   id?: string;
   estado: EstadoSuscripcion;
