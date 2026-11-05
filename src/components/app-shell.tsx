@@ -4,12 +4,14 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
 import {
+  AlertTriangle,
   Bell,
   Boxes,
   FileText,
   Landmark,
   ShieldCheck,
   ShoppingCart,
+  Sparkles,
   Users,
   UserCircle,
   LogOut,
@@ -19,6 +21,7 @@ import {
   X
 } from "lucide-react";
 import { logout } from "@/actions/auth";
+import type { EstadoSuscripcion } from "@/actions/configuracion";
 import { MODULOS_POR_ROL, ROL_LABEL } from "@/lib/permisos";
 import { cn } from "@/lib/utils";
 import type { RolUsuario } from "@/types";
@@ -49,13 +52,19 @@ export function AppShell({
   esAdmin = false,
   rolUsuario = "owner",
   nombreUsuario = "Usuario",
-  nombreNegocio = "Mi Kiosco"
+  nombreNegocio = "Mi Kiosco",
+  suscripcion,
 }: {
   children: React.ReactNode;
   esAdmin?: boolean;
   rolUsuario?: RolUsuario;
   nombreUsuario?: string;
   nombreNegocio?: string;
+  suscripcion?: {
+    estado: EstadoSuscripcion;
+    diasRestantes: number;
+    operativa: boolean;
+  };
 }) {
   const path = usePathname();
 
@@ -169,6 +178,28 @@ export function AppShell({
           </div>
 
           <div className="flex items-center gap-2 md:gap-3 text-slate-400" onClick={e => e.stopPropagation()}>
+            {/* Pill de período de prueba o alerta de suscripción */}
+            {suscripcion && !esAdmin && (
+              suscripcion.operativa && suscripcion.estado === "prueba" ? (
+                <Link
+                  href={rolUsuario === "cajero" ? "/pos" : "/configuracion"}
+                  className="hidden sm:inline-flex items-center gap-1.5 rounded-full border border-cyan-500/30 bg-cyan-500/10 px-3 py-1 text-[11px] font-semibold text-cyan-300 transition hover:bg-cyan-500/20"
+                  title="Días restantes de tu prueba gratis"
+                >
+                  <Sparkles className="size-3.5 text-cyan-400" />
+                  Prueba gratis: {Math.max(0, suscripcion.diasRestantes)}d
+                </Link>
+              ) : !suscripcion.operativa ? (
+                <Link
+                  href={rolUsuario === "cajero" ? "/pos" : "/configuracion"}
+                  className="inline-flex items-center gap-1.5 rounded-full border border-red-500/40 bg-red-500/15 px-3 py-1 text-[11px] font-bold text-red-300 transition hover:bg-red-500/25"
+                >
+                  <AlertTriangle className="size-3.5 text-red-400" />
+                  {suscripcion.estado === "pausada" ? "Suscripción pausada" : "Suscripción vencida"}
+                </Link>
+              ) : null
+            )}
+
             {/* Notificaciones */}
             <div className="relative">
               <button
@@ -225,6 +256,26 @@ export function AppShell({
             </div>
           </div>
         </header>
+
+        {/* Banner si la suscripción o prueba venció */}
+        {suscripcion && !suscripcion.operativa && !esAdmin && !path.startsWith("/configuracion") && (
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-red-500/30 bg-red-500/15 px-4 py-2 text-xs text-red-200">
+            <span className="flex items-center gap-2 font-medium">
+              <AlertTriangle className="size-4 shrink-0 text-red-400" />
+              {suscripcion.estado === "pausada"
+                ? "Tu suscripción está pausada. No se pueden abrir turnos ni registrar nuevas ventas."
+                : "Tu período de prueba de 7 días o suscripción ha vencido. Reactivala para seguir vendiendo."}
+            </span>
+            {rolUsuario !== "cajero" && (
+              <Link
+                href="/configuracion"
+                className="rounded-lg bg-red-500 px-3 py-1 text-[11px] font-bold text-white transition hover:bg-red-400"
+              >
+                Ir a Suscripción
+              </Link>
+            )}
+          </div>
+        )}
 
         {/* Área de contenido con scroll nativo fluido */}
         <main className="min-h-0 flex-1 overflow-y-auto p-3 sm:p-4 md:p-6 pb-20 md:pb-6">

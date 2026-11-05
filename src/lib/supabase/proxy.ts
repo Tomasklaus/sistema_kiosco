@@ -1,7 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-const PUBLIC_ROUTES = ["/login"];
+const PUBLIC_ROUTES = ["/login", "/api/webhooks"];
 
 export async function updateSession(request: NextRequest) {
   // Modo demo: sin claves de Supabase se omite la autenticación para poder ver la UI.

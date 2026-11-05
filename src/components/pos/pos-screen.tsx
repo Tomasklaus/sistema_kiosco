@@ -31,6 +31,7 @@ import { beepError, beepOk, buscarPorCodigo, normalizarCodigo } from "@/lib/barc
 import { esPesable } from "@/lib/producto-ui";
 import { textoDetalleLinea, textoStock } from "@/lib/pesables";
 import { cn, formatARS, formatCantidad, parseNumeroPositivo } from "@/lib/utils";
+import type { MetodosPagoNegocio } from "@/actions/configuracion";
 import type { MetodoPago, ProductoUI } from "@/types";
 
 const PAGOS: { id: MetodoPago; key: string; label: string; icon: typeof Banknote }[] = [
@@ -47,13 +48,22 @@ const COLORES = [
   "from-green-500/25 to-green-500/5 border-green-400/30",
 ];
 
-export function PosScreen({ productos, categorias = [], turnoAbierto, clientes, puedeEditar = false }: {
+export function PosScreen({
+  productos,
+  categorias = [],
+  turnoAbierto,
+  clientes,
+  puedeEditar = false,
+  metodosActivos = { efectivo: true, mercadopago: true, tarjeta: true, cuenta_corriente: true },
+}: {
   productos: ProductoUI[];
   categorias?: { id: string; nombre: string }[];
   turnoAbierto: boolean;
   clientes: { id: string; nombre: string }[];
   /** Dueño/admin: pueden editar el producto directo desde el POS. */
   puedeEditar?: boolean;
+  /** Métodos de cobro habilitados para este kiosco desde Configuración. */
+  metodosActivos?: MetodosPagoNegocio;
 }) {
   const router = useRouter();
   const [pending, startT] = useTransition();
@@ -65,7 +75,11 @@ export function PosScreen({ productos, categorias = [], turnoAbierto, clientes, 
   const { add, setCantidad, remove, clear, total } = useCartStore();
   const items = useCartItems();
   const [query, setQuery] = useState("");
-  const [pago, setPago] = useState<MetodoPago>("efectivo");
+  const pagosDisponibles = useMemo(() => {
+    const filtrados = PAGOS.filter((p) => metodosActivos[p.id] !== false);
+    return filtrados.length ? filtrados : PAGOS;
+  }, [metodosActivos]);
+  const [pago, setPago] = useState<MetodoPago>(() => pagosDisponibles[0]?.id ?? "efectivo");
   const [recibido, setRecibido] = useState("");
   const [clienteId, setClienteId] = useState("");
   const [fondo, setFondo] = useState("");
@@ -194,7 +208,11 @@ export function PosScreen({ productos, categorias = [], turnoAbierto, clientes, 
     const h = (e: KeyboardEvent) => {
       const map: Record<string, MetodoPago> = { F2: "efectivo", F3: "mercadopago", F4: "tarjeta", F5: "cuenta_corriente" };
       if (e.key === "F1") { e.preventDefault(); searchRef.current?.focus(); }
-      if (map[e.key]) { e.preventDefault(); setPago(map[e.key]); }
+      const targetMetodo = map[e.key];
+      if (targetMetodo && pagosDisponibles.some((p) => p.id === targetMetodo)) {
+        e.preventDefault();
+        setPago(targetMetodo);
+      }
       // Si ya se está cobrando (o el foco está en un input), F9 no hace nada.
       if (e.key === "F9") {
         e.preventDefault();
@@ -204,7 +222,7 @@ export function PosScreen({ productos, categorias = [], turnoAbierto, clientes, 
     };
     window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);
-  }, [cobrar, turnoAbierto]);
+  }, [cobrar, turnoAbierto, pagosDisponibles]);
 
 
   if (!turnoAbierto) {
@@ -464,7 +482,7 @@ export function PosScreen({ productos, categorias = [], turnoAbierto, clientes, 
 
             {/* Selector de métodos de pago */}
             <div className="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-1.5">
-              {PAGOS.map(({ id, key, label, icon: Icon }) => (
+              {pagosDisponibles.map(({ id, label, icon: Icon }) => (
                 <button 
                   key={id} 
                   onClick={() => setPago(id)}

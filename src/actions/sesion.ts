@@ -1,6 +1,7 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
+import { calcularEstadoSuscripcion, type EstadoSuscripcion } from "@/actions/configuracion";
 import type { RolUsuario } from "@/types";
 
 export interface Sesion {
@@ -10,6 +11,11 @@ export interface Sesion {
   rol: RolUsuario;
   negocio: string;
   activo: boolean;
+  suscripcion: {
+    estado: EstadoSuscripcion;
+    diasRestantes: number;
+    operativa: boolean;
+  };
 }
 
 export interface AlertaStock {
@@ -38,6 +44,28 @@ export async function obtenerSesion(): Promise<Sesion | null> {
   if (!data) return null;
 
   const tenant = data.tenants as unknown as { nombre: string } | null;
+  const tenantId = (data.tenant_id as string | undefined) ?? "";
+
+  let subRow: { estado?: string | null; fecha_fin?: string | null } | null = null;
+  if (tenantId) {
+    const { data: subTenant, error } = await supabase
+      .from("suscripciones")
+      .select("estado, fecha_fin")
+      .eq("tenant_id", tenantId)
+      .maybeSingle();
+    if (!error && subTenant) subRow = subTenant;
+  }
+  if (!subRow) {
+    const { data: subUser } = await supabase
+      .from("suscripciones")
+      .select("estado, fecha_fin")
+      .eq("usuario_id", user.id)
+      .maybeSingle();
+    if (subUser) subRow = subUser;
+  }
+
+  const calc = calcularEstadoSuscripcion(subRow);
+
   return {
     id: user.id,
     email: user.email ?? "",
@@ -45,6 +73,7 @@ export async function obtenerSesion(): Promise<Sesion | null> {
     rol: data.rol as RolUsuario,
     negocio: tenant?.nombre ?? "Mi negocio",
     activo: data.activo !== false,
+    suscripcion: calc,
   };
 }
 

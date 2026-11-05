@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
+import { useSearchParams } from "next/navigation";
 import { 
   Building2, 
   CreditCard, 
@@ -8,6 +9,7 @@ import {
   CheckCircle2, 
   AlertCircle, 
   Clock, 
+  PauseCircle,
   Save, 
   Handshake, 
   Banknote, 
@@ -26,7 +28,16 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { toast } from "sonner";
-import { actualizarDatosNegocio, type NegocioConfig, type SuscripcionInfo } from "@/actions/configuracion";
+import {
+  actualizarDatosNegocio,
+  actualizarMetodosPagoNegocio,
+  iniciarSuscripcionMercadoPago,
+  iniciarSuscripcionPayPal,
+  METODOS_PAGO_DEFAULT,
+  type MetodosPagoNegocio,
+  type NegocioConfig,
+  type SuscripcionInfo,
+} from "@/actions/configuracion";
 import { LlaveEnManoModal } from "@/components/configuracion/llave-en-mano-modal";
 import { formatARS } from "@/lib/utils";
 
@@ -134,6 +145,7 @@ export function ConfiguracionScreen({
   suscripcion: SuscripcionInfo; 
   usuario: { id: string; email: string; rol: string }; 
 }) {
+  const searchParams = useSearchParams();
   const [tab, setTab] = useState<"suscripcion" | "metodos_pago" | "negocio">("suscripcion");
   const [pending, startTransition] = useTransition();
 
@@ -146,13 +158,25 @@ export function ConfiguracionScreen({
   // Formulario negocio
   const [nombreNegocio, setNombreNegocio] = useState(negocio.nombre || "");
 
-  // Métodos de cobro activos en el POS
-  const [metodos, setMetodos] = useState({
-    efectivo: true,
-    mercadopago: true,
-    tarjeta: true,
-    cuenta_corriente: true,
-  });
+  // Métodos de cobro activos en el POS (persistidos en BD)
+  const [metodos, setMetodos] = useState<MetodosPagoNegocio>(
+    negocio.metodos_pago_activos ?? METODOS_PAGO_DEFAULT,
+  );
+
+  // Mostrar notificación al volver del checkout de Mercado Pago o PayPal
+  useEffect(() => {
+    const pago = searchParams.get("pago");
+    if (!pago) return;
+    if (pago === "mp_exito" || pago === "paypal_exito") {
+      toast.success("¡Pago procesado con éxito! Tu suscripción se actualizará en instantes.");
+    } else if (pago === "llave_exito") {
+      toast.success("¡Pago del Servicio Llave en Mano recibido! Te contactaremos a la brevedad.");
+    } else if (pago === "pendiente") {
+      toast.info("Tu pago está pendiente de acreditación.");
+    } else if (pago === "cancelado") {
+      toast.warning("El proceso de pago fue cancelado.");
+    }
+  }, [searchParams]);
 
   const handleGuardarNegocio = () => {
     if (!nombreNegocio.trim()) return toast.error("El nombre del negocio no puede estar vacío");
@@ -166,30 +190,100 @@ export function ConfiguracionScreen({
     });
   };
 
-  const handleSuscribirMP = () => {
+  const handleToggleMetodo = (clave: keyof MetodosPagoNegocio, valor: boolean) => {
+    const nuevos: MetodosPagoNegocio = { ...metodos, [clave]: valor };
+    if (!nuevos.efectivo && !nuevos.mercadopago && !nuevos.tarjeta && !nuevos.cuenta_corriente) {
+      toast.error("Debés dejar al menos un método de cobro habilitado en el POS");
+      return;
+    }
+    const previos = metodos;
+    setMetodos(nuevos);
+    startTransition(async () => {
+      const res = await actualizarMetodosPagoNegocio(nuevos);
+      if (!res.ok) {
+        setMetodos(previos);
+        toast.error(res.error || "No se pudo guardar la preferencia");
+        return;
+      }
+      toast.success("Métodos de cobro del POS actualizados");
+    });
+  };
+
+  const handleSuscribirMP = async () => {
     setLoadingMp(true);
     toast.info("Conectando con Mercado Pago...");
-    setTimeout(() => {
-      // Reemplazar con el checkout/preapproval de Mercado Pago
-      window.location.href = "https://www.mercadopago.com.ar/subscriptions";
-    }, 800);
+    try {
+      const res = await iniciarSuscripcionMercadoPago();
+      if (!res.ok || !res.data?.url) {
+        toast.error(res.error || "No se pudo conectar con Mercado Pago");
+        setLoadingMp(false);
+        return;
+      }
+      window.location.href = res.data.url;
+    } catch {
+      toast.error("Error de red al conectar con Mercado Pago");
+      setLoadingMp(false);
+    }
   };
 
-  const handleSuscribirPP = () => {
+  const handleSuscribirPP = async () => {
     setLoadingPp(true);
     toast.info("Conectando con PayPal...");
-    setTimeout(() => {
-      // Reemplazar con el plan de PayPal
-      window.location.href = "https://www.paypal.com/billing/subscriptions";
-    }, 800);
+    try {
+      const res = await iniciarSuscripcionPayPal();
+      if (!res.ok || !res.data?.url) {
+        toast.error(res.error || "No se pudo conectar con PayPal");
+        setLoadingPp(false);
+        return;
+      }
+      window.location.href = res.data.url;
+    } catch {
+      toast.error("Error de red al conectar con PayPal");
+      setLoadingPp(false);
+    }
   };
 
-  const estadoBadge = {
-    activa: { label: "Activa", bg: "bg-emerald-500/20 text-emerald-400 border-emerald-500/30", icon: CheckCircle2 },
-    pendiente: { label: "Pendiente", bg: "bg-amber-500/20 text-amber-400 border-amber-500/30", icon: Clock },
-    inactiva: { label: "Sin suscripción activa", bg: "bg-slate-500/20 text-slate-400 border-slate-500/30", icon: AlertCircle },
-    cancelada: { label: "Cancelada", bg: "bg-red-500/20 text-red-400 border-red-500/30", icon: AlertCircle },
-  }[suscripcion.estado];
+  const vencidaPorFecha =
+    (suscripcion.estado === "prueba" || suscripcion.estado === "activa") && !suscripcion.operativa;
+
+  const estadoBadge = vencidaPorFecha
+    ? {
+        label: suscripcion.estado === "prueba" ? "Prueba gratis vencida" : "Suscripción vencida",
+        bg: "bg-red-500/20 text-red-400 border-red-500/30",
+        icon: AlertCircle,
+      }
+    : {
+        prueba: {
+          label: `Prueba Gratis (${Math.max(0, suscripcion.dias_restantes)}d restantes)`,
+          bg: "bg-cyan-500/20 text-cyan-300 border-cyan-500/30",
+          icon: Sparkles,
+        },
+        activa: {
+          label: "Activa",
+          bg: "bg-emerald-500/20 text-emerald-400 border-emerald-500/30",
+          icon: CheckCircle2,
+        },
+        pausada: {
+          label: "Pausada",
+          bg: "bg-amber-500/20 text-amber-300 border-amber-500/30",
+          icon: PauseCircle,
+        },
+        pendiente: {
+          label: "Pendiente",
+          bg: "bg-amber-500/20 text-amber-400 border-amber-500/30",
+          icon: Clock,
+        },
+        inactiva: {
+          label: "Sin suscripción activa",
+          bg: "bg-slate-500/20 text-slate-400 border-slate-500/30",
+          icon: AlertCircle,
+        },
+        cancelada: {
+          label: "Cancelada",
+          bg: "bg-red-500/20 text-red-400 border-red-500/30",
+          icon: AlertCircle,
+        },
+      }[suscripcion.estado];
 
   const BadgeIcon = estadoBadge.icon;
 
@@ -243,6 +337,23 @@ export function ConfiguracionScreen({
       {/* TAB 1: SUSCRIPCIÓN */}
       {tab === "suscripcion" && (
         <div className="space-y-6">
+          {/* Alerta si la suscripción / prueba está vencida o pausada */}
+          {!suscripcion.operativa && (
+            <div className="flex items-start gap-3 rounded-2xl border border-red-500/40 bg-red-500/10 p-4 text-sm text-red-200">
+              <AlertCircle className="mt-0.5 size-5 shrink-0 text-red-400" />
+              <div>
+                <p className="font-bold text-white">
+                  {suscripcion.estado === "pausada"
+                    ? "Tu suscripción se encuentra pausada"
+                    : "Tu período de prueba de 7 días o suscripción ha vencido"}
+                </p>
+                <p className="mt-0.5 text-xs text-red-200/80">
+                  Para seguir abriendo turnos y registrando ventas en el Punto de Venta, activá tu suscripción mensual con Mercado Pago o PayPal. Tus productos, clientes e historial siguen intactos.
+                </p>
+              </div>
+            </div>
+          )}
+
           {/* Banner: Plan Pioneros (oferta de lanzamiento) */}
           <div className="relative overflow-hidden rounded-2xl border border-amber-500/30 bg-slate-950 bg-gradient-to-r from-amber-500/15 via-cyan-500/10 to-transparent p-5 sm:p-6">
             <Rocket className="pointer-events-none absolute -right-6 -top-6 size-32 text-amber-500/10" />
@@ -262,13 +373,13 @@ export function ConfiguracionScreen({
                   Precio congelado a{" "}
                   <strong className="font-bold text-white">{formatARS(PRECIO_PIONERO_ARS)} ARS/mes</strong>{" "}
                   (Precio regular futuro:{" "}
-                  <span className="text-slate-400 line-through text-slate-500">{formatARS(PRECIO_REGULAR_ARS)} ARS/mes</span>
+                  <span className="line-through text-slate-500">{formatARS(PRECIO_REGULAR_ARS)} ARS/mes</span>
                   ). Garantía de tarifa fija mientras mantengas tu suscripción activa.
                 </p>
               </div>
               <div className="flex shrink-0 items-center gap-2 rounded-xl border border-cyan-500/25 bg-cyan-500/10 px-3.5 py-2.5 text-xs text-cyan-200">
                 <ShieldCheck className="size-4 shrink-0 text-cyan-400" />
-                Tarifa bloqueada para siempre
+                7 días de prueba gratis incluidos
               </div>
             </div>
           </div>
@@ -277,7 +388,7 @@ export function ConfiguracionScreen({
           <div className="panel p-6 flex flex-wrap items-center justify-between gap-4">
             <div>
               <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">Estado de tu cuenta</span>
-              <div className="flex items-center gap-3 mt-1">
+              <div className="flex flex-wrap items-center gap-3 mt-1">
                 <span className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-bold ${estadoBadge.bg}`}>
                   <BadgeIcon className="size-3.5" />
                   {estadoBadge.label}
@@ -285,21 +396,25 @@ export function ConfiguracionScreen({
                 <span className="text-lg font-bold text-white">{suscripcion.plan}</span>
               </div>
               <p className="text-xs text-slate-400 mt-2">
-                Usuario principal: <span className="text-slate-200">{usuario.email}</span> (Rol: {usuario.rol})
+                Usuario: <span className="text-slate-200">{usuario.email}</span> (Rol: {usuario.rol})
               </p>
             </div>
 
-            {suscripcion.estado === "activa" ? (
+            {suscripcion.operativa ? (
               <div className="text-right">
-                <span className="text-xs text-slate-400">Próxima renovación</span>
+                <span className="text-xs text-slate-400">
+                  {suscripcion.estado === "prueba" ? "Fin de prueba gratis" : "Próximo vencimiento / renovación"}
+                </span>
                 <p className="text-sm font-semibold text-emerald-400">
-                  {suscripcion.fecha_fin ? new Date(suscripcion.fecha_fin).toLocaleDateString() : "Automática mensual"}
+                  {suscripcion.fecha_fin
+                    ? `${new Date(suscripcion.fecha_fin).toLocaleDateString("es-AR")} (${Math.max(0, suscripcion.dias_restantes)} días)`
+                    : "Automática mensual"}
                 </p>
               </div>
             ) : (
-              <div className="flex items-center gap-2 rounded-xl bg-emerald-500/10 border border-emerald-500/20 px-4 py-2 text-xs text-emerald-300">
-                <Sparkles className="size-4 shrink-0 text-emerald-400" />
-                Elegí una opción de pago mensual para mantener activas las funciones ilimitadas.
+              <div className="flex items-center gap-2 rounded-xl bg-amber-500/10 border border-amber-500/25 px-4 py-2 text-xs text-amber-200">
+                <Sparkles className="size-4 shrink-0 text-amber-400" />
+                Elegí Mercado Pago o PayPal abajo para activar tu cuenta de inmediato.
               </div>
             )}
           </div>
@@ -346,7 +461,7 @@ export function ConfiguracionScreen({
                   </div>
 
                   <button
-                    onClick={suscribir}
+                    onClick={() => void suscribir()}
                     disabled={loading}
                     className={`mt-8 flex w-full items-center justify-center gap-2 rounded-xl py-3 text-sm font-bold shadow-lg transition active:scale-[0.98] disabled:opacity-50 ${plan.ctaCls}`}
                   >
@@ -430,7 +545,7 @@ export function ConfiguracionScreen({
           <div>
             <h3 className="text-lg font-bold text-white">Métodos de Cobro Habilitados en Caja</h3>
             <p className="text-xs text-slate-400 mt-1">
-              Seleccioná las formas de pago que tus cajeros podrán registrar en el Punto de Venta (POS).
+              Seleccioná las formas de pago que tus cajeros podrán registrar en el Punto de Venta (POS). Se guardan automáticamente para todo tu negocio.
             </p>
           </div>
 
@@ -449,11 +564,9 @@ export function ConfiguracionScreen({
               <input
                 type="checkbox"
                 checked={metodos.efectivo}
-                onChange={(e) => {
-                  setMetodos({ ...metodos, efectivo: e.target.checked });
-                  toast.success("Preferencia actualizada");
-                }}
-                className="size-5 accent-emerald-500 cursor-pointer"
+                disabled={pending}
+                onChange={(e) => handleToggleMetodo("efectivo", e.target.checked)}
+                className="size-5 accent-emerald-500 cursor-pointer disabled:opacity-50"
               />
             </div>
 
@@ -471,11 +584,9 @@ export function ConfiguracionScreen({
               <input
                 type="checkbox"
                 checked={metodos.mercadopago}
-                onChange={(e) => {
-                  setMetodos({ ...metodos, mercadopago: e.target.checked });
-                  toast.success("Preferencia actualizada");
-                }}
-                className="size-5 accent-emerald-500 cursor-pointer"
+                disabled={pending}
+                onChange={(e) => handleToggleMetodo("mercadopago", e.target.checked)}
+                className="size-5 accent-emerald-500 cursor-pointer disabled:opacity-50"
               />
             </div>
 
@@ -493,11 +604,9 @@ export function ConfiguracionScreen({
               <input
                 type="checkbox"
                 checked={metodos.tarjeta}
-                onChange={(e) => {
-                  setMetodos({ ...metodos, tarjeta: e.target.checked });
-                  toast.success("Preferencia actualizada");
-                }}
-                className="size-5 accent-emerald-500 cursor-pointer"
+                disabled={pending}
+                onChange={(e) => handleToggleMetodo("tarjeta", e.target.checked)}
+                className="size-5 accent-emerald-500 cursor-pointer disabled:opacity-50"
               />
             </div>
 
@@ -515,11 +624,9 @@ export function ConfiguracionScreen({
               <input
                 type="checkbox"
                 checked={metodos.cuenta_corriente}
-                onChange={(e) => {
-                  setMetodos({ ...metodos, cuenta_corriente: e.target.checked });
-                  toast.success("Preferencia actualizada");
-                }}
-                className="size-5 accent-emerald-500 cursor-pointer"
+                disabled={pending}
+                onChange={(e) => handleToggleMetodo("cuenta_corriente", e.target.checked)}
+                className="size-5 accent-emerald-500 cursor-pointer disabled:opacity-50"
               />
             </div>
           </div>
@@ -575,4 +682,3 @@ export function ConfiguracionScreen({
     </div>
   );
 }
-

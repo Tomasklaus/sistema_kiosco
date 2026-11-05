@@ -1,15 +1,17 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { CheckCircle2, Loader2, MessageCircle, CreditCard, ShieldCheck, X } from "lucide-react";
+import { CheckCircle2, Loader2, MessageCircle, CreditCard, Globe, ShieldCheck, X } from "lucide-react";
 import { toast } from "sonner";
+import { iniciarPagoLlaveEnMano } from "@/actions/configuracion";
 
 /**
  * Número de WhatsApp comercial del servicio "Llave en Mano".
- * Formato internacional sin "+" ni espacios (ej: 5492664000000).
- * TODO: reemplazar por el número real del negocio antes de publicar.
+ * Configurable con `NEXT_PUBLIC_WHATSAPP_COMERCIAL` en `.env.local`
+ * (formato internacional sin "+" ni espacios, ej: 5492664000000).
  */
-const WHATSAPP_LLAVE_EN_MANO = "5492664000000";
+const WHATSAPP_LLAVE_EN_MANO =
+  process.env.NEXT_PUBLIC_WHATSAPP_COMERCIAL || "5492664000000";
 
 const MENSAJE_WHATSAPP =
   "¡Hola! Quiero contratar el Servicio \"Llave en Mano\" del Kiosco POS (carga de catálogo, lector y capacitación). ¿Me pasan los pasos?";
@@ -26,10 +28,10 @@ const opcionCls =
 
 /**
  * Modal de contratación del servicio opcional "Llave en Mano":
- * abre WhatsApp con el mensaje pre-cargado o inicia el pago único.
+ * abre WhatsApp con el mensaje pre-cargado o inicia el pago único en MP / PayPal.
  */
 export function LlaveEnManoModal({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const [loadingPago, setLoadingPago] = useState(false);
+  const [loadingProveedor, setLoadingProveedor] = useState<"mercadopago" | "paypal" | null>(null);
 
   // Escape cierra el modal y se bloquea el scroll del body mientras está abierto
   useEffect(() => {
@@ -48,13 +50,25 @@ export function LlaveEnManoModal({ open, onClose }: { open: boolean; onClose: ()
 
   if (!open) return null;
 
-  const pedirPago = () => {
-    setLoadingPago(true);
-    toast.info("Preparando el pago único del Servicio Llave en Mano...");
-    setTimeout(() => {
-      // Reemplazar con el checkout de pago único de Mercado Pago / PayPal
-      window.location.href = "https://www.mercadopago.com.ar/checkout/v1/redirect";
-    }, 800);
+  const pedirPago = async (proveedor: "mercadopago" | "paypal") => {
+    setLoadingProveedor(proveedor);
+    toast.info(
+      proveedor === "mercadopago"
+        ? "Preparando el checkout de Mercado Pago..."
+        : "Preparando el checkout de PayPal...",
+    );
+    try {
+      const res = await iniciarPagoLlaveEnMano(proveedor);
+      if (!res.ok || !res.data?.url) {
+        toast.error(res.error || "No se pudo iniciar el checkout");
+        setLoadingProveedor(null);
+        return;
+      }
+      window.location.href = res.data.url;
+    } catch {
+      toast.error("Error de red al conectar con la pasarela de pago");
+      setLoadingProveedor(null);
+    }
   };
 
   return (
@@ -86,7 +100,7 @@ export function LlaveEnManoModal({ open, onClose }: { open: boolean; onClose: ()
           </button>
         </div>
 
-        <div className="space-y-4 px-5 py-5">
+        <div className="space-y-3.5 px-5 py-5">
           <p className="text-sm text-slate-300">
             Cargamos tu catálogo, configuramos tu lector y te capacitamos en vivo para que empieces
             a vender de inmediato. Elegí cómo querés empezar:
@@ -110,16 +124,52 @@ export function LlaveEnManoModal({ open, onClose }: { open: boolean; onClose: ()
             </span>
           </a>
 
-          <button type="button" onClick={pedirPago} disabled={loadingPago} className={opcionCls}>
+          <button
+            type="button"
+            onClick={() => void pedirPago("mercadopago")}
+            disabled={loadingProveedor !== null}
+            className={opcionCls}
+          >
             <span className="rounded-lg bg-sky-500/20 p-2.5 text-sky-400">
-              {loadingPago ? <Loader2 className="size-5 animate-spin" /> : <CreditCard className="size-5" />}
+              {loadingProveedor === "mercadopago" ? (
+                <Loader2 className="size-5 animate-spin" />
+              ) : (
+                <CreditCard className="size-5" />
+              )}
             </span>
             <span>
               <span className="block text-sm font-semibold text-white">
-                {loadingPago ? "Conectando con el checkout..." : "Pagar online"}
+                {loadingProveedor === "mercadopago"
+                  ? "Conectando con Mercado Pago..."
+                  : "Pagar con Mercado Pago ($40.000 ARS)"}
               </span>
               <span className="block text-xs text-slate-400">
-                Pago único de $40.000,00 ARS (o $30 USD desde el exterior). Coordinamos el trabajo después del pago.
+                Pago único en pesos argentinos con tarjeta, dinero en cuenta o transferencia.
+              </span>
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => void pedirPago("paypal")}
+            disabled={loadingProveedor !== null}
+            className={opcionCls}
+          >
+            <span className="rounded-lg bg-blue-600/20 p-2.5 text-blue-400">
+              {loadingProveedor === "paypal" ? (
+                <Loader2 className="size-5 animate-spin" />
+              ) : (
+                <Globe className="size-5" />
+              )}
+            </span>
+            <span>
+              <span className="block text-sm font-semibold text-white">
+                {loadingProveedor === "paypal"
+                  ? "Conectando con PayPal..."
+                  : "Pagar desde el Exterior con PayPal ($30 USD)"}
+              </span>
+              <span className="block text-xs text-slate-400">
+                Pago único internacional en dólares. Coordinamos el trabajo después del pago.
               </span>
             </span>
           </button>

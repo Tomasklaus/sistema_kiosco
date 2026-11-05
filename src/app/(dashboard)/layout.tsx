@@ -24,6 +24,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
       rolUsuario={sesion.rol}
       nombreUsuario={sesion.nombre ?? sesion.email}
       nombreNegocio={sesion.negocio}
+      suscripcion={sesion.suscripcion}
     >
       {children}
     </AppShell>

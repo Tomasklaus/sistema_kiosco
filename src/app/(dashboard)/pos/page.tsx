@@ -3,11 +3,17 @@ import { listarCategorias, listarProductos } from "@/actions/productos";
 import { obtenerCaja } from "@/actions/caja";
 import { listarClientes } from "@/actions/clientes";
 import { obtenerSesion } from "@/actions/sesion";
+import { obtenerMetodosPagoActivos } from "@/actions/configuracion";
 import { puedeVerCostos } from "@/lib/permisos";
 
 export default async function PosPage() {
-  const [productos, categorias, caja, clientes, sesion] = await Promise.all([
-    listarProductos(), listarCategorias(), obtenerCaja(), listarClientes(), obtenerSesion(),
+  const [productos, categorias, caja, clientes, sesion, metodosActivos] = await Promise.all([
+    listarProductos(),
+    listarCategorias(),
+    obtenerCaja(),
+    listarClientes(),
+    obtenerSesion(),
+    obtenerMetodosPagoActivos(),
   ]);
 
   // El cajero no debe recibir los costos en el navegador
@@ -21,6 +27,7 @@ export default async function PosPage() {
       turnoAbierto={!!caja}
       clientes={clientes.map((c) => ({ id: c.id, nombre: c.nombre }))}
       puedeEditar={puedeEditar}
+      metodosActivos={metodosActivos}
     />
   );
 }
