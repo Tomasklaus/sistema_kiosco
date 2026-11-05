@@ -13,7 +13,7 @@ async function obtenerTokenPayPal(): Promise<{ token: string; apiBase: string } 
   const secret = process.env.PAYPAL_CLIENT_SECRET;
   if (!clientId || !secret) return null;
 
-  const isLive = process.env.PAYPAL_ENV === "live" || process.env.NODE_ENV === "production";
+  const isLive = process.env.PAYPAL_ENV === "live";
   const apiBase =
     process.env.PAYPAL_API_BASE ||
     (isLive ? "https://api-m.paypal.com" : "https://api-m.sandbox.paypal.com");

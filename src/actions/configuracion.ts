@@ -341,12 +341,13 @@ export async function iniciarSuscripcionMercadoPago(): Promise<ActionResult<{ ur
 /**
  * Obtiene un access_token OAuth2 de PayPal (Live o Sandbox según PAYPAL_ENV).
  */
-async function obtenerTokenPayPal(): Promise<{ token: string; apiBase: string } | null> {
+async function obtenerTokenPayPal(): Promise<{ token: string; apiBase: string; error?: string } | null> {
   const clientId = process.env.PAYPAL_CLIENT_ID;
   const secret = process.env.PAYPAL_CLIENT_SECRET;
   if (!clientId || !secret) return null;
 
-  const isLive = process.env.PAYPAL_ENV === "live" || process.env.NODE_ENV === "production";
+  // Si PAYPAL_ENV está explícito como 'live', va a producción. En cualquier otro caso (sandbox o default) usa sandbox.
+  const isLive = process.env.PAYPAL_ENV === "live";
   const apiBase =
     process.env.PAYPAL_API_BASE ||
     (isLive ? "https://api-m.paypal.com" : "https://api-m.sandbox.paypal.com");
@@ -361,7 +362,11 @@ async function obtenerTokenPayPal(): Promise<{ token: string; apiBase: string } 
     body: "grant_type=client_credentials",
   });
 
-  if (!res.ok) return null;
+  if (!res.ok) {
+    const errorBody = await res.text().catch(() => "");
+    console.error("Error autenticando con PayPal:", res.status, errorBody);
+    return { token: "", apiBase, error: `Error PayPal OAuth (${res.status}): ${errorBody}` };
+  }
   const json = await res.json();
   if (!json?.access_token) return null;
   return { token: json.access_token as string, apiBase };
@@ -379,10 +384,13 @@ export async function iniciarSuscripcionPayPal(): Promise<ActionResult<{ url: st
   const customId = `${ctx.tenantId}:${ctx.userId}`;
 
   const authPP = await obtenerTokenPayPal();
+  if (authPP?.error) {
+    return { ok: false, error: authPP.error };
+  }
   const planId = process.env.PAYPAL_PLAN_ID;
 
   // 1. Si hay credenciales y PAYPAL_PLAN_ID, creamos una suscripción recurrente oficial
-  if (authPP && planId) {
+  if (authPP && authPP.token && planId) {
     try {
       const res = await fetch(`${authPP.apiBase}/v1/billing/subscriptions`, {
         method: "POST",
