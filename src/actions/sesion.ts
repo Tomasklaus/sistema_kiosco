@@ -1,7 +1,7 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
-import { calcularEstadoSuscripcion, type EstadoSuscripcion } from "@/actions/configuracion";
+import { calcularEstadoSuscripcion, type EstadoSuscripcion } from "@/lib/suscripcion";
 import type { RolUsuario } from "@/types";
 
 export interface Sesion {
