@@ -341,7 +341,7 @@ export async function iniciarSuscripcionMercadoPago(): Promise<ActionResult<{ ur
 /**
  * Obtiene un access_token OAuth2 de PayPal (Live o Sandbox según PAYPAL_ENV).
  */
-async function obtenerTokenPayPal(): Promise<{ token: string; apiBase: string; error?: string } | null> {
+export async function obtenerTokenPayPal(): Promise<{ token: string; apiBase: string; error?: string } | null> {
   const clientId = process.env.PAYPAL_CLIENT_ID;
   const secret = process.env.PAYPAL_CLIENT_SECRET;
   if (!clientId || !secret) return null;

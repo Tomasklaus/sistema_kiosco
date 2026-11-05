@@ -37,6 +37,7 @@ import {
   type NegocioConfig,
   type SuscripcionInfo,
 } from "@/actions/configuracion";
+import { confirmarSuscripcionPayPal } from "@/actions/paypal-confirm";
 import { METODOS_PAGO_DEFAULT } from "@/lib/suscripcion";
 import { LlaveEnManoModal } from "@/components/configuracion/llave-en-mano-modal";
 import { formatARS } from "@/lib/utils";
@@ -163,11 +164,29 @@ export function ConfiguracionScreen({
     negocio.metodos_pago_activos ?? METODOS_PAGO_DEFAULT,
   );
 
-  // Mostrar notificación al volver del checkout de Mercado Pago o PayPal
+  // Mostrar notificación y confirmar suscripción al volver del checkout de Mercado Pago o PayPal
   useEffect(() => {
     const pago = searchParams.get("pago");
+    const subId = searchParams.get("subscription_id");
     if (!pago) return;
-    if (pago === "mp_exito" || pago === "paypal_exito") {
+
+    if (pago === "paypal_exito") {
+      if (subId) {
+        toast.loading("Confirmando suscripción con PayPal...", { id: "paypal-confirm" });
+        confirmarSuscripcionPayPal(subId).then((res) => {
+          if (res.ok) {
+            toast.success("¡Suscripción activada con éxito!", { id: "paypal-confirm" });
+            window.location.href = "/configuracion";
+          } else {
+            toast.info("Pago recibido. Si los días demoran en actualizarse, aguardá unos instantes.", {
+              id: "paypal-confirm",
+            });
+          }
+        });
+      } else {
+        toast.success("¡Pago procesado con éxito! Tu suscripción se actualizará en instantes.");
+      }
+    } else if (pago === "mp_exito") {
       toast.success("¡Pago procesado con éxito! Tu suscripción se actualizará en instantes.");
     } else if (pago === "llave_exito") {
       toast.success("¡Pago del Servicio Llave en Mano recibido! Te contactaremos a la brevedad.");
