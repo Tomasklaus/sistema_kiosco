@@ -76,3 +76,4 @@ export async function confirmarSuscripcionPayPal(subscriptionId: string): Promis
     return { ok: false, error: e instanceof Error ? e.message : "Error al confirmar suscripción" };
   }
 }
+
